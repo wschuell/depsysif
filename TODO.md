@@ -1,0 +1,11 @@
+- [ ] basic implementation of network class
+- [ ] insert code for crates and libio
+- [ ] SQL queries
+- [ ] imports from file
+- [ ] write a test csv file with a simple phony network
+- [ ] extract slice at given timestamp
+- [ ] Gephi .gexf exports
+- [ ] simulation objects
+- [ ] algo configurations and parameters
+- [ ] data analysis outputs (raw vectors and plots) 
+- [ ] examples and tests

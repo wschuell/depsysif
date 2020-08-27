@@ -1,3 +1,5 @@
 networkx
+dynetworkx
 matplotlib
 numpy
+pandas
