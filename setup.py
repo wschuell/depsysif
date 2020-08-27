@@ -7,16 +7,16 @@ from setuptools import setup, find_packages
 
 
 def version():
-    with open('PYLIB/_version.py') as f:
+    with open('depsysif/_version.py') as f:
         return re.search(r"^__version__ = ['\"]([^'\"]*)['\"]", f.read()).group(1)
 
 def requirements():
   with open('requirements.txt') as f:
     return f.readlines()
 
-setup(name='PYLIB',
+setup(name='depsysif',
       version=version(),
-      packages=['PYLIB'],#find_packages(),
+      packages=['depsysif'],#find_packages(),
       install_requires=[requirements()],
       author='',
       author_email='',
