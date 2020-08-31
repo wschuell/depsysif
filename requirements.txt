@@ -3,3 +3,4 @@ dynetworkx
 matplotlib
 numpy
 pandas
+psycopg2
