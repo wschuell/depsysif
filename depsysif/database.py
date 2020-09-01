@@ -3,6 +3,7 @@ import os
 import logging
 import sqlite3
 import psycopg2
+from psycopg2 import extras
 
 logger = logging.getLogger(__name__)
 ch = logging.StreamHandler()
@@ -92,7 +93,7 @@ class Database(object):
 				CREATE TABLE IF NOT EXISTS projects(
 				id BIGSERIAL PRIMARY KEY,
 				name TEXT UNIQUE,
-				created_at TIME NOT NULL
+				created_at TIMESTAMP NOT NULL
 				);
 
 				CREATE INDEX IF NOT EXISTS proj_date ON projects(created_at);
@@ -102,7 +103,7 @@ class Database(object):
 				id BIGSERIAL PRIMARY KEY,
 				project_id BIGINT REFERENCES projects(id) ON DELETE CASCADE,
 				name TEXT,
-				created_at TIME NOT NULL
+				created_at TIMESTAMP NOT NULL
 				);
 
 				CREATE INDEX IF NOT EXISTS versions_date ON versions(project_id,created_at);
@@ -119,7 +120,7 @@ class Database(object):
 				id BIGSERIAL PRIMARY KEY,
 				name TEXT,
 				full_network BOOLEAN NOT NULL,
-				snapshot_time TIME NOT NULL
+				snapshot_time TIMESTAMP NOT NULL
 				);
 
 				CREATE INDEX IF NOT EXISTS snap_time ON snapshots(snapshot_time);
@@ -144,12 +145,49 @@ class Database(object):
 		self.cursor.execute('DROP TABLE IF EXISTS versions;')
 		self.cursor.execute('DROP TABLE IF EXISTS projects;')
 		self.connection.commit()
+
+	def fill_from_crates(self,cratesdb_cursor=None,port=5432,user='postgres',database='crates_db',host='localhost'):
+		'''
+		Fill projects, versions and deps from crates.io database
+		'''
+		if cratesdb_cursor is None:
+			conn = psycopg2.connect(user=user,port=port,database=database,host=host)
+			cratesdb_cursor = conn.cursor()
 		
-	def fill_from_crates(self):
-		'''
-		Fill from crates.io database
-		'''
-		pass
+		# PROJECTS
+		logger.info('Filling projects')
+		cratesdb_cursor.execute(''' SELECT id,name,created_at FROM crates;''')
+		if self.db_type == 'postgres':
+			extras.execute_batch(self.cursor,'INSERT INTO projects(id,name,created_at) VALUES(%s,%s,%s) ON CONFLICT DO NOTHING;',cratesdb_cursor.fetchall())
+		else:
+			self.cursor.executemany('INSERT OR IGNORE INTO projects(id,name,created_at) VALUES(?,?,?);',cratesdb_cursor.fetchall())
+
+		self.connection.commit()
+		logger.info('Filled projects')
+
+
+		# VERSIONS
+		logger.info('Filling versions')
+		cratesdb_cursor.execute(''' SELECT id,num,crate_id,created_at FROM versions;''')
+		if self.db_type == 'postgres':
+			extras.execute_batch(self.cursor,'INSERT INTO versions(id,name,project_id,created_at) VALUES(%s,%s,%s,%s) ON CONFLICT DO NOTHING;',cratesdb_cursor.fetchall())
+		else:
+			self.cursor.executemany('INSERT OR IGNORE INTO versions(id,name,project_id,created_at) VALUES(?,?,?,?);',cratesdb_cursor.fetchall())
+
+		self.connection.commit()
+		logger.info('Filled versions')
+
+		# DEPENDENCIES
+		logger.info('Filling dependencies')
+		cratesdb_cursor.execute(''' SELECT version_id,crate_id FROM dependencies;''')
+		if self.db_type == 'postgres':
+			extras.execute_batch(self.cursor,'INSERT INTO dependencies(version_id,project_id) VALUES(%s,%s) ON CONFLICT DO NOTHING;',cratesdb_cursor.fetchall())
+		else:
+			self.cursor.executemany('INSERT OR IGNORE INTO dependencies(version_id,project_id) VALUES(?,?);',cratesdb_cursor.fetchall())
+
+		self.connection.commit()
+		logger.info('Filled dependencies')
+
 
 	def fill_from_libio(self):
 		'''
