@@ -267,6 +267,14 @@ class Database(object):
 		if ans is not None:
 			snapid,snapname = ans
 			logger.info('Snapshot with full_network={} and snapshot_time={} already exists. Id: {}, Name: {}'.format(full_network,snapshot_time,snapid,snapname))
+			if self.db_type == 'postgres':
+				self.cursor.execute('SELECT * FROM snapshot_data WHERE snapshot_id=%s LIMIT 1;',(snapid,))
+			else:
+				self.cursor.execute('SELECT * FROM snapshot_data WHERE snapshot_id=? LIMIT 1;',(snapid,))
+			if self.cursor.fetchone() is not None:
+				logger.info('Snapshot data already filled, skipping')
+				return
+
 		else:
 			logger.info('Creating snapshot with full_network={} and snapshot_time={}'.format(full_network,snapshot_time))
 			if self.db_type == 'postgres':
@@ -380,7 +388,43 @@ class Database(object):
 				return None
 
 
+	def get_nodes(self,snapshot_id=None,snapshot_time=None):
+		'''
+		Gets the list of existing projects at a given time, or at the time of a given snapshot
+		Based on 'created_at' attribute of projects
+		Priority to snapshot_time
+		'''
+		if snapshot_time is not None:
+			snaptime = snapshot_time
+		elif snapshot_id is not None:
+			if self.db_type == 'postgres':
+				self.cursor.execute('SELECT snapshot_time FROM snapshots WHERE id=%s;',(snapshot_id,))
+			else:
+				self.cursor.execute('SELECT snapshot_time FROM snapshots WHERE id=?;',(snapshot_id,))
+			query_result = self.cursor.fetchone()
+			if query_result is None:
+				raise ValueError('Snapshot id not found in database: {}'.format(snapshot_id))
+			else:
+				print(query_result)
+				snaptime = query_result[0]
+		if isinstance(snaptime,str):
+			try:
+				if len(snaptime) == 10:
+					snaptime = datetime.datetime.strptime(snaptime, '%Y-%m-%d')
+				elif len(snaptime) == 19:
+					snaptime = datetime.datetime.strptime(snaptime, '%Y-%m-%d %H:%M:%S')
+				else:
+					raise Exception # Just used to trigger the error handling, the specific message is only written once this way
+			except:
+				raise ValueError('Unknown timestamp format {} : Should be datetime object, or YYYY-MM-DD or YYYY-MM-DD HH:MM:SS'.format(snaptime))
+		logger.info('Getting nodes at time {}'.format(snaptime.strftime('%Y-%m-%d %H:%M:%S')))
+		if self.db_type == 'postgres':
+			self.cursor.execute('SELECT id FROM projects WHERE created_at<=%s;',(snaptime,))
+		else:
+			self.cursor.execute('SELECT id FROM projects WHERE created_at<=(SELECT DATETIME(?));',(snaptime,))
+		return [r[0] for r in self.cursor.fetchall()]
 
+		
 
 	def get_network(self,snapshot_id=None,snapshot_name=None,snapshot_time=None,full_network=False,as_nx_obj=False):
 		'''
@@ -413,6 +457,8 @@ class Database(object):
 		edge_list = list(self.cursor.fetchall()) # Could be used/returned as a generator
 		if as_nx_obj:
 			g = nx.DiGraph()
+			node_list = self.get_nodes(snapshot_id=snapid)
+			g.add_nodes_from(node_list)
 			g.add_edges_from(edge_list)
 			return g
 		else:
