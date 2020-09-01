@@ -277,7 +277,7 @@ class Database(object):
 						INNER JOIN projects pused
 							ON pused.id=d.project_id
 						INNER JOIN versions v
-							ON v.project_id=d.version_id AND v.created_at<=%s
+							ON v.id=d.version_id AND v.created_at<=%s
 					;''',(snapshot_time,))
 			else:
 				self.cursor.execute('''SELECT DISTINCT v.project_id,pused.id
@@ -285,7 +285,7 @@ class Database(object):
 						INNER JOIN projects pused
 							ON pused.id=d.project_id
 						INNER JOIN versions v
-							ON v.project_id=d.version_id AND v.created_at<=?
+							ON v.id=d.version_id AND (SELECT DATETIME(v.created_at))<=(SELECT DATETIME(?))
 					;''',(snapshot_time,))
 		else:
 			if self.db_type == 'postgres':
@@ -293,23 +293,28 @@ class Database(object):
 						FROM dependencies d
 						INNER JOIN projects pused
 							ON pused.id=d.project_id
-						INNER JOIN (select p.id as project_id,lv.id,lv.name,lv.created_at from projects p
- 										join lateral
-										(select v.id,v.name,v.created_at from versions v where project_id =p.id
-										and created_at<=%s
-										order by created_at desc 
-										limit 1) lv on true
-										order by created_at
+						INNER JOIN (SELECT p.id AS project_id,lv.id,lv.name,lv.created_at FROM projects p
+ 										JOIN LATERAL
+										(SELECT v.id,v.name,v.created_at FROM versions v WHERE project_id =p.id
+										AND created_at<=%s
+										ORDER BY created_at DESC 
+										LIMIT 1) lv ON true
+										ORDER BY created_at
 									) v
-							ON v.project_id=d.version_id
+							ON v.id=d.version_id
 					;''',(snapshot_time,))
 			else:
 				self.cursor.execute('''SELECT DISTINCT v.project_id,pused.id
 						FROM dependencies d
 						INNER JOIN projects pused
 							ON pused.id=d.project_id
-						INNER JOIN versions v
-							ON v.project_id=d.version_id AND v.created_at<=?
+						JOIN versions v
+							ON v.id in 
+								(SELECT v1.id FROM versions v1 
+									WHERE v1.project_id=v.project_id 
+									AND (SELECT DATETIME(v1.created_at))<=(SELECT DATETIME(?))
+									ORDER BY created_at DESC LIMIT 1)
+							AND v.id=d.version_id
 					;''',(snapshot_time,))
 		print(len(list(self.cursor.fetchall())))
 
