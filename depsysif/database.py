@@ -4,6 +4,7 @@ import logging
 import sqlite3
 import psycopg2
 from psycopg2 import extras
+import networkx as nx
 
 logger = logging.getLogger(__name__)
 ch = logging.StreamHandler()
@@ -141,6 +142,10 @@ class Database(object):
 			self.connection.commit()
 
 	def clean_db(self):
+		'''
+		Dropping tables
+		If there is a change in structure in the init script, this method should be called to 'reset' the state of the database
+		'''
 		logger.info('Cleaning database')
 		self.cursor.execute('DROP TABLE IF EXISTS snapshot_data;')
 		self.cursor.execute('DROP TABLE IF EXISTS snapshots;')
@@ -263,11 +268,18 @@ class Database(object):
 			snapid,snapname = ans
 			logger.info('Snapshot with full_network={} and snapshot_time={} already exists. Id: {}, Name: {}'.format(full_network,snapshot_time,snapid,snapname))
 		else:
-			logger.info('Creating snapshot with full_network={} and snapshot_time={}'.format(full_network,t))
+			logger.info('Creating snapshot with full_network={} and snapshot_time={}'.format(full_network,snapshot_time))
 			if self.db_type == 'postgres':
 				self.cursor.execute('INSERT INTO snapshots(name,full_network,snapshot_time) VALUES(%s,%s,%s);',(name,full_network,snapshot_time))
 			else:
 				self.cursor.execute('INSERT INTO snapshots(name,full_network,snapshot_time) VALUES(?,?,?);',(name,full_network,snapshot_time))
+			if self.db_type == 'postgres':
+				self.cursor.execute('SELECT id,name FROM snapshots WHERE full_network=%s AND snapshot_time=%s;',(full_network,snapshot_time))
+			else:
+				self.cursor.execute('SELECT id,name FROM snapshots WHERE full_network=? AND snapshot_time=?;',(full_network,snapshot_time))
+
+			snapid,snapname = self.cursor.fetchone()
+			logger.info('Created snapshot with full_network={} and snapshot_time={}. Id: {}, Name: {}'.format(full_network,snapshot_time,snapid,snapname))
 
 		# Queries. Full network gets all links that existed at some point in the past. When it is set to false, it looks only at dependencies of the last version. 
 		if full_network:
@@ -316,24 +328,83 @@ class Database(object):
 									ORDER BY created_at DESC LIMIT 1)
 							AND v.id=d.version_id
 					;''',(snapshot_time,))
-		print(len(list(self.cursor.fetchall())))
+		# print(len(list(self.cursor.fetchall())))
 
-		# full_net:
-		# 	query sqlite
-		# 	query postgres
-		# not full_net:
-		# 	query sqlite
-		# 	query postgres
-		# insert snapshot entry
-		# inserts: (snapid, using,used,)
-		# 	query sqlite
-		# 	query postgres
-		
+		# Insert query results
+		if self.db_type == 'postgres':
+			extras.execute_batch(self.cursor,'''
+				INSERT INTO snapshot_data(snapshot_id,project_using,project_used) VALUES(%s,%s,%s);
+				''',((snapid,using,used) for using,used in self.cursor.fetchall()))
+		else:
+			self.cursor.executemany('''
+				INSERT INTO snapshot_data(snapshot_id,project_using,project_used) VALUES(?,?,?);
+				''',((snapid,using,used) for using,used in self.cursor.fetchall()))
+	
+		#Final commit to the DB
+		self.connection.commit()
 
-	def get_network(self,snapshot_name=None,snapshot_time=None,full_bool=False):
+	def get_snapshot_id(self,snapshot_name=None,snapshot_time=None,full_network=False):
+		'''
+		Returns the id if existing, None otherwise
+		If no args are provided for the time, max time is used. Otherwise name has priority.
+		'''
+		if snapshot_name is not None:
+			if self.db_type == 'postgres':
+				self.cursor.execute('SELECT id FROM snapshots WHERE name=%s;',(snapshot_name,))
+			else:
+				self.cursor.execute('SELECT id FROM snapshots WHERE name=?;',(snapshot_name,))
+			id_list = [r[0] for r in self.cursor.fetchall()]
+			if len(id_list)==1:
+				return id_list[0]
+			elif len(id_list) > 1:
+				raise ValueError('The database has several ({}) snapshots with the same name: {}'.format(len(id_list),snapshot_name))
+			else:
+				return None
+
+		else:
+			if snapshot_time is None:
+				self.cursor.execute('SELECT MAX(created_at) FROM versions;')
+				snapshot_time = self.cursor.fetchone()[0]
+
+			if self.db_type == 'postgres':
+				self.cursor.execute('SELECT id FROM snapshots WHERE full_network=%s AND snapshot_time=%s;',(full_network,snapshot_time))
+			else:
+				self.cursor.execute('SELECT id FROM snapshots WHERE full_network=? AND snapshot_time=(SELECT DATETIME(?));',(full_network,snapshot_time))
+			
+			id_list = [r[0] for r in self.cursor.fetchall()]
+			if len(id_list)==1:
+				return id_list[0]
+			elif len(id_list) > 1:
+				raise ValueError('The database returned several ({}) snapshots for the parameters: full_network {}, snapshot_time {}'.format(len(id_list),full_network, snapshot_time))
+			else:
+				return None
+
+
+
+
+	def get_network(self,snapshot_name=None,snapshot_time=None,full_network=False,as_nx_obj=False):
 		'''
 		Returns a snapshotted network in the form of an edge list.
 		If no args are provided, max time is used. Otherwise name has priority.
 		If time is provided and does not exist in the database, build_snapshot is called.
 		'''
-		pass
+		snapid = self.get_snapshot_id(snapshot_name=snapshot_name,snapshot_time=snapshot_time,full_network=full_network)
+		if snapid is None:
+			self.build_snapshot(t=snapshot_time,full_network=full_network,name=snapshot_name)
+			snapid = self.get_snapshot_id(snapshot_name=snapshot_name,snapshot_time=snapshot_time,full_network=full_network)
+		
+		logger.info('Getting elements of snapshot {}'.format(snapid))
+
+		if self.db_type == 'postgres':
+			self.cursor.execute('SELECT project_using,project_used FROM snapshot_data WHERE snapshot_id=%s;',(snapid,))
+		else:
+			self.cursor.execute('SELECT project_using,project_used FROM snapshot_data WHERE snapshot_id=?;',(snapid,))
+
+		edge_list = list(self.cursor.fetchall()) # Could be used/returned as a generator
+		if as_nx_obj:
+			g = nx.DiGraph()
+			g.add_edges_from(edge_list)
+			return g
+		else:
+			return edge_list
+
