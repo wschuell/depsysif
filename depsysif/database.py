@@ -27,7 +27,7 @@ class Database(object):
 			self.connection = sqlite3.connect(os.path.join(db_folder,'{}.db'.format(db_name)))
 			self.cursor = self.connection.cursor()
 		elif db_type == 'postgres':
-			self.connection = psycopg2.connect(username=db_user,port=port,host=host,database=db_name)
+			self.connection = psycopg2.connect(user=db_user,port=port,host=host,database=db_name)
 			self.cursor = self.connection.cursor()
 		else:
 			raise ValueError('Unknown DB type: {}'.format(db_type))
@@ -88,9 +88,9 @@ class Database(object):
 				self.cursor.execute(q)
 			self.connection.commit()
 		elif self.db_type == 'postgres':
-			self.cursor.executemany('''
+			self.cursor.execute('''
 				CREATE TABLE IF NOT EXISTS projects(
-				id BIGINT PRIMARY KEY,
+				id BIGSERIAL PRIMARY KEY,
 				name TEXT UNIQUE,
 				created_at TIME NOT NULL
 				);
@@ -99,7 +99,7 @@ class Database(object):
 				CREATE INDEX IF NOT EXISTS proj_name ON projects(name);
 
 				CREATE TABLE IF NOT EXISTS versions(
-				id BIGINT PRIMARY KEY,
+				id BIGSERIAL PRIMARY KEY,
 				project_id BIGINT REFERENCES projects(id) ON DELETE CASCADE,
 				name TEXT,
 				created_at TIME NOT NULL
@@ -116,20 +116,20 @@ class Database(object):
 				CREATE INDEX IF NOT EXISTS dep_reverse ON dependencies(project_id,version_id);
 
 				CREATE TABLE IF NOT EXISTS snapshots(
-				id BIGINT PRIMARY KEY,
+				id BIGSERIAL PRIMARY KEY,
 				name TEXT,
-				full BOOL NOT NULL,
+				full_network BOOLEAN NOT NULL,
 				snapshot_time TIME NOT NULL
 				);
 
 				CREATE INDEX IF NOT EXISTS snap_time ON snapshots(snapshot_time);
-				CREATE INDEX IF NOT EXISTS snap_name ON snapshots(snapshot_name);
+				CREATE INDEX IF NOT EXISTS snap_name ON snapshots(name);
 
 
 				CREATE TABLE IF NOT EXISTS snapshot_data(
-				snapshot_id INTEGER REFERENCES snapshots(id) ON DELETE CASCADE,
-				project_using INTEGER REFERENCES projects(id) ON DELETE CASCADE,
-				project_used INTEGER REFERENCES projects(id) ON DELETE CASCADE,
+				snapshot_id BIGINT REFERENCES snapshots(id) ON DELETE CASCADE,
+				project_using BIGINT REFERENCES projects(id) ON DELETE CASCADE,
+				project_used BIGINT REFERENCES projects(id) ON DELETE CASCADE,
 				PRIMARY KEY(snapshot_id,project_using,project_used)
 				);
 
@@ -137,6 +137,14 @@ class Database(object):
 				''')
 			self.connection.commit()
 
+	def clean_db(self):
+		self.cursor.execute('DROP TABLE IF EXISTS snapshot_data;')
+		self.cursor.execute('DROP TABLE IF EXISTS snapshots;')
+		self.cursor.execute('DROP TABLE IF EXISTS dependencies;')
+		self.cursor.execute('DROP TABLE IF EXISTS versions;')
+		self.cursor.execute('DROP TABLE IF EXISTS projects;')
+		self.connection.commit()
+		
 	def fill_from_crates(self):
 		'''
 		Fill from crates.io database
