@@ -382,16 +382,26 @@ class Database(object):
 
 
 
-	def get_network(self,snapshot_name=None,snapshot_time=None,full_network=False,as_nx_obj=False):
+	def get_network(self,snapshot_id=None,snapshot_name=None,snapshot_time=None,full_network=False,as_nx_obj=False):
 		'''
 		Returns a snapshotted network in the form of an edge list.
 		If no args are provided, max time is used. Otherwise name has priority.
 		If time is provided and does not exist in the database, build_snapshot is called.
 		'''
-		snapid = self.get_snapshot_id(snapshot_name=snapshot_name,snapshot_time=snapshot_time,full_network=full_network)
-		if snapid is None:
-			self.build_snapshot(t=snapshot_time,full_network=full_network,name=snapshot_name)
+		if snapshot_id is not None:
+			if self.db_type == 'postgres':
+				self.cursor.execute('SELECT * FROM snapshots WHERE id=%s,',(snapshot_id,))
+			else:
+				self.cursor.execute('SELECT * FROM snapshots WHERE id=?,',(snapshot_id,))
+			if self.cursor.fetchone() is None:
+				raise ValueError('Snapshot id not found in database: {}'.format(snapshot_id))
+			else:
+				snapid = snapshot_id
+		else:
 			snapid = self.get_snapshot_id(snapshot_name=snapshot_name,snapshot_time=snapshot_time,full_network=full_network)
+			if snapid is None:
+				self.build_snapshot(t=snapshot_time,full_network=full_network,name=snapshot_name)
+				snapid = self.get_snapshot_id(snapshot_name=snapshot_name,snapshot_time=snapshot_time,full_network=full_network)
 		
 		logger.info('Getting elements of snapshot {}'.format(snapid))
 
