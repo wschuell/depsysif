@@ -93,7 +93,7 @@ class Database(object):
 				CREATE TABLE IF NOT EXISTS simulations(
 				id INTEGER PRIMARY KEY,
 				snapshot_id INTEGER REFERENCES snapshots(id) ON DELETE CASCADE,
-				created_at DATE DEFAULT DATETIME('now'),
+				created_at DATE DEFAULT CURRENT_TIMESTAMP,
 				sim_cfg TEXT,
 				random_seed INTEGER,
 				failing_project INTEGER REFERENCES projects(id) ON DELETE CASCADE
