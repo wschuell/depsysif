@@ -5,6 +5,7 @@ import sqlite3
 import psycopg2
 from psycopg2 import extras
 import networkx as nx
+import csv
 
 logger = logging.getLogger(__name__)
 ch = logging.StreamHandler()
@@ -42,7 +43,7 @@ class Database(object):
 		'''
 		Initializing the database, with correct tables, constraints and indexes.
 		'''
-		logger.info('Creating database table and indexes')
+		logger.info('Creating database ({}) table and indexes'.format(self.db_type))
 		if self.db_type == 'sqlite':
 			DB_INIT = '''
 				CREATE TABLE IF NOT EXISTS projects(
@@ -238,7 +239,7 @@ class Database(object):
 		if not self.is_empty(table='projects'):
 			logger.info('Table projects already filled')
 		else:
-			logger.info('Filling projects')
+			logger.info('Filling projects from {}'.format(database))
 			cratesdb_cursor.execute(''' SELECT id,name,created_at FROM crates;''')
 			if self.db_type == 'postgres':
 				extras.execute_batch(self.cursor,'INSERT INTO projects(id,name,created_at) VALUES(%s,%s,%s) ON CONFLICT DO NOTHING;',cratesdb_cursor.fetchall())
@@ -252,7 +253,7 @@ class Database(object):
 		if not self.is_empty(table='versions'):
 			logger.info('Table versions already filled')
 		else:
-			logger.info('Filling versions')
+			logger.info('Filling versions from {}'.format(database))
 			cratesdb_cursor.execute(''' SELECT id,num,crate_id,created_at FROM versions;''')
 			if self.db_type == 'postgres':
 				extras.execute_batch(self.cursor,'INSERT INTO versions(id,name,project_id,created_at) VALUES(%s,%s,%s,%s) ON CONFLICT DO NOTHING;',cratesdb_cursor.fetchall())
@@ -266,7 +267,7 @@ class Database(object):
 		if not self.is_empty(table='dependencies'):
 			logger.info('Table dependencies already filled')
 		else:
-			logger.info('Filling dependencies')
+			logger.info('Filling dependencies from {}'.format(database))
 			if optional_deps:
 				cratesdb_cursor.execute(''' SELECT version_id,crate_id FROM dependencies;''')
 			else:
@@ -280,9 +281,12 @@ class Database(object):
 			logger.info('Filled dependencies')
 
 
-	def fill_from_libio(self,libio_cursor=None,port=5432,user='postgres',database='librariesio_db',host='localhost',password=None,platform=None,dependency_types=['runtime','import',''],optional_deps=False):
+	def fill_from_libio(self,libio_cursor=None,port=5432,user='postgres',database='librariesio_db',host='localhost',password=None,platform=None,dependency_types=None,optional_deps=False):
 		'''
 		Fill from libraries.io database
+		created_at is by default chosen for a reference date in the versions table, but published_at could be selected as an alternative
+		we do not check here the 'dependency_platform', only the origin project platform, this might cause issues
+
 		'''
 
 		if libio_cursor is None:
@@ -291,12 +295,30 @@ class Database(object):
 			conn = psycopg2.connect(user=user,port=port,database=database,host=host,password=password)
 			libio_cursor = conn.cursor()
 
+		# Setting bool variables for checks
+		# NB: dependency_types has to be transformed into a tuple, not a list, before being 'fed' to psycopg2
+		if not optional_deps:
+			optional_deps_check = True
+		else:
+			optional_deps_check = False
+
+		if dependency_types is None:
+			dependency_types_check = False
+		else:
+			dependency_types_check = True
+
+		if platform is None:
+			platform_check = False
+		else:
+			platform_check = True
+
+
 		# PROJECTS
 		if not self.is_empty(table='projects'):
 			logger.info('Table projects already filled')
 		else:
-			logger.info('Filling projects')
-			libio_cursor.execute(''' SELECT id,name,created_at FROM crates;''')######
+			logger.info('Filling projects from {}'.format(database))
+			libio_cursor.execute(''' SELECT id,name,created_at FROM projects WHERE (NOT %s OR platform=%s);''',(platform_check,platform))######
 			if self.db_type == 'postgres':
 				extras.execute_batch(self.cursor,'INSERT INTO projects(id,name,created_at) VALUES(%s,%s,%s) ON CONFLICT DO NOTHING;',libio_cursor.fetchall())
 			else:
@@ -309,8 +331,9 @@ class Database(object):
 		if not self.is_empty(table='versions'):
 			logger.info('Table versions already filled')
 		else:
-			logger.info('Filling versions')
-			libio_cursor.execute(''' SELECT id,num,crate_id,created_at FROM versions;''')######
+			logger.info('Filling versions from {}'.format(database))
+			libio_cursor.execute(''' SELECT id,number,project_id,created_at FROM versions WHERE (NOT %s OR platform=%s);''',(platform_check,platform))
+
 			if self.db_type == 'postgres':
 				extras.execute_batch(self.cursor,'INSERT INTO versions(id,name,project_id,created_at) VALUES(%s,%s,%s,%s) ON CONFLICT DO NOTHING;',libio_cursor.fetchall())
 			else:
@@ -323,8 +346,14 @@ class Database(object):
 		if not self.is_empty(table='dependencies'):
 			logger.info('Table dependencies already filled')
 		else:
-			logger.info('Filling dependencies')
-			libio_cursor.execute(''' SELECT version_id,crate_id FROM dependencies;''')######
+			logger.info('Filling dependencies from {}'.format(database))
+			
+			
+			libio_cursor.execute(''' SELECT version_id,dependency_project_id FROM dependencies
+											WHERE (NOT %s OR NOT optional_dependency)
+											AND (NOT %s OR platform=%s)
+											AND (NOT %s OR dependency_kind IN %s)
+											;''',(optional_deps_check,platform_check,platform,dependency_types_check,tuple(dependency_types))) # cf remarks at bool vars definition
 			if self.db_type == 'postgres':
 				extras.execute_batch(self.cursor,'INSERT INTO dependencies(version_id,project_id) VALUES(%s,%s) ON CONFLICT DO NOTHING;',libio_cursor.fetchall())
 			else:
@@ -334,17 +363,82 @@ class Database(object):
 			logger.info('Filled dependencies')
 
 
-	def fill_from_csv(self):
+	def fill_from_csv(self,folder='.',projects_file='projects.csv',versions_file='versions.csv',dependencies_file='dependencies.csv',headers_present=False,delimiter=','):
 		'''
-		Fill from csv file
+		Fill from csv files, organized as:
+		 projects_file: id, name, created_at
+		 versions_file: id, number, project_id, created_at
+		 dependencies_file: version_id,project_id
+
+		with or without headers.
+
+		Other templates could be used in theory, but would need another implementation of this method.
 		'''
-		pass
+
+		# PROJECTS
+		if not self.is_empty(table='projects'):
+			logger.info('Table projects already filled')
+		else:
+			logger.info('Filling projects from file {}'.format(projects_file))
+			with open(os.path.join(folder,projects_file),'r') as f:
+				reader = csv.reader(f,delimiter=delimiter)
+				if headers_present:
+					next(reader)
+
+				if self.db_type == 'postgres':
+					extras.execute_batch(self.cursor,'INSERT INTO projects(id,name,created_at) VALUES(%s,%s,%s) ON CONFLICT DO NOTHING;',(r for r in reader))
+				else:
+					self.cursor.executemany('INSERT OR IGNORE INTO projects(id,name,created_at) VALUES(?,?,?);',(r for r in reader))
+				self.connection.commit()
+			logger.info('Filled projects')
+
+
+		# VERSIONS
+		if not self.is_empty(table='versions'):
+			logger.info('Table versions already filled')
+		else:
+			logger.info('Filling versions from file {}'.format(versions_file))
+			with open(os.path.join(folder,versions_file),'r') as f:
+				reader = csv.reader(f,delimiter=delimiter)
+				if headers_present:
+					next(reader)
+
+				if self.db_type == 'postgres':
+					extras.execute_batch(self.cursor,'INSERT INTO versions(id,name,project_id,created_at) VALUES(%s,%s,%s,%s) ON CONFLICT DO NOTHING;',reader)
+				else:
+					self.cursor.executemany('INSERT OR IGNORE INTO versions(id,name,project_id,created_at) VALUES(?,?,?,?);',reader)
+	
+				self.connection.commit()
+			logger.info('Filled versions')
+
+		# DEPENDENCIES
+		if not self.is_empty(table='dependencies'):
+			logger.info('Table dependencies already filled')
+		else:
+			logger.info('Filling dependencies from file {}'.format(dependencies_file))
+			
+			
+			
+			with open(os.path.join(folder,dependencies_file),'r') as f:
+				reader = csv.reader(f,delimiter=delimiter)
+				if headers_present:
+					next(reader)
+
+				if self.db_type == 'postgres':
+					extras.execute_batch(self.cursor,'INSERT INTO dependencies(version_id,project_id) VALUES(%s,%s) ON CONFLICT DO NOTHING;',reader)
+				else:
+					self.cursor.executemany('INSERT OR IGNORE INTO dependencies(version_id,project_id) VALUES(?,?);',reader)
+	
+				self.connection.commit()
+			logger.info('Filled dependencies')
+
+
 
 	def build_snapshot(self,t,full_network=False,name=None):
 		'''
 		Build a snapshot in the database, by reference to a datetime object t.
 		If t is a string, intenting to convert it to datetime first.
-		Should be YYYY-MM-DD.
+		Should be 'YYYY-MM-DD' or 'YYYY-MM-DD HH:MM:SS'.
 
 		full_network is used to tell if the snapshot uses the dependencies of all past versions, or just the latest versions of projects
 		'''
@@ -576,7 +670,7 @@ class Database(object):
 	def detect_cycles(self,snapshot_id,cycle_length):
 		'''
 		detecting cycles in a particular snapshot
-		Length 1,2 and 3 supported so far
+		Length 1,2,3 and 4 supported so far
 
 		Returning a tuple per (distinct) cycle, beginning at the lowest project id for each cycle.
 		Auto-excluding smaller length subcycles.
@@ -631,6 +725,26 @@ class Database(object):
 				self.cursor.execute('''
 					SELECT sd1.project_using,sd2.project_using,sd3.project_using FROM snapshot_data sd1
 						INNER JOIN snapshot_data sd2
+							ON sd1.snapshot_id=? AND sd2.snapshot_id=?
+							AND sd1.project_used=sd2.project_using  -- propagation to sd2
+							AND sd1.project_using!=sd1.project_used  -- no 1-cycle in sd1
+							AND sd2.project_using!=sd2.project_used  -- no 1-cycle in sd2
+							AND sd1.project_using!=sd2.project_used  -- no 2-cycle in sd1-sd2
+							AND sd1.project_using<sd2.project_using -- uniqueness first step -- might be combined with other statements
+						INNER JOIN snapshot_data sd3
+							ON sd3.snapshot_id=?
+							AND sd2.project_used=sd3.project_using   -- propagation to sd3
+							AND sd3.project_used=sd1.project_using    -- propagation to sd1
+							AND sd3.project_using!=sd3.project_used  -- no 1-cycle in sd3
+							AND sd2.project_using!=sd3.project_used  -- no 2-cycle in sd2-sd3
+							AND sd3.project_using!=sd1.project_used  -- no 2-cycle in sd3-sd1
+							AND sd1.project_using<sd3.project_using -- uniqueness second step -- might be combined with other statements
+						;''',(snapshot_id,snapshot_id,snapshot_id,))
+		elif cycle_length == 4:
+			if self.db_type == 'postgres':
+				self.cursor.execute('''
+					SELECT sd1.project_using,sd2.project_using,sd3.project_using FROM snapshot_data sd1
+						INNER JOIN snapshot_data sd2
 							ON sd1.snapshot_id=%s AND sd2.snapshot_id=%s
 							AND sd1.project_used=sd2.project_using  -- propagation to sd2
 							AND sd1.project_using!=sd1.project_used  -- no 1-cycle in sd1
@@ -640,17 +754,53 @@ class Database(object):
 						INNER JOIN snapshot_data sd3
 							ON sd3.snapshot_id=%s
 							AND sd2.project_used=sd3.project_using   -- propagation to sd3
-							AND sd3.project_used=sd1.project_using    -- propagation to sd1
 							AND sd3.project_using!=sd3.project_used  -- no 1-cycle in sd3
 							AND sd2.project_using!=sd3.project_used  -- no 2-cycle in sd2-sd3
-							AND sd3.project_using!=sd1.project_used  -- no 2-cycle in sd3-sd1
 							AND sd1.project_using<sd3.project_using -- uniqueness second step -- might be combined with other statements
-						;''',(snapshot_id,snapshot_id,snapshot_id,))
+							AND sd3.project_used!=sd1.project_using  -- no 3-cycle in sd1-sd3
+						INNER JOIN snapshot_data sd4
+							ON sd4.snapshot_id=%s
+							AND sd3.project_used=sd3.project_using   -- propagation to sd4
+							AND sd4.project_used=sd1.project_using    -- propagation to sd1
+							AND sd4.project_using!=sd4.project_used  -- no 1-cycle in sd4
+							AND sd3.project_using!=sd4.project_used  -- no 2-cycle in sd3-sd4
+							AND sd4.project_using!=sd1.project_used  -- no 2-cycle in sd4-sd1
+							AND sd1.project_using<sd4.project_using -- uniqueness third step -- might be combined with other statements
+							AND sd4.project_used!=sd2.project_using  -- no 3-cycle in sd2-sd4
+						;''',(snapshot_id,snapshot_id,snapshot_id,snapshot_id,))
+			else:
+				self.cursor.execute('''
+					SELECT sd1.project_using,sd2.project_using,sd3.project_using FROM snapshot_data sd1
+						INNER JOIN snapshot_data sd2
+							ON sd1.snapshot_id=? AND sd2.snapshot_id=?
+							AND sd1.project_used=sd2.project_using  -- propagation to sd2
+							AND sd1.project_using!=sd1.project_used  -- no 1-cycle in sd1
+							AND sd2.project_using!=sd2.project_used  -- no 1-cycle in sd2
+							AND sd1.project_using!=sd2.project_used  -- no 2-cycle in sd1-sd2
+							AND sd1.project_using<sd2.project_using -- uniqueness first step -- might be combined with other statements
+						INNER JOIN snapshot_data sd3
+							ON sd3.snapshot_id=?
+							AND sd2.project_used=sd3.project_using   -- propagation to sd3
+							AND sd3.project_using!=sd3.project_used  -- no 1-cycle in sd3
+							AND sd2.project_using!=sd3.project_used  -- no 2-cycle in sd2-sd3
+							AND sd1.project_using<sd3.project_using -- uniqueness second step -- might be combined with other statements
+							AND sd3.project_used!=sd1.project_using  -- no 3-cycle in sd1-sd3
+						INNER JOIN snapshot_data sd4
+							ON sd4.snapshot_id=?
+							AND sd3.project_used=sd3.project_using   -- propagation to sd4
+							AND sd4.project_used=sd1.project_using    -- propagation to sd1
+							AND sd4.project_using!=sd4.project_used  -- no 1-cycle in sd4
+							AND sd3.project_using!=sd4.project_used  -- no 2-cycle in sd3-sd4
+							AND sd4.project_using!=sd1.project_used  -- no 2-cycle in sd4-sd1
+							AND sd1.project_using<sd4.project_using -- uniqueness third step -- might be combined with other statements
+							AND sd4.project_used!=sd2.project_using  -- no 3-cycle in sd2-sd4
+						;''',(snapshot_id,snapshot_id,snapshot_id,snapshot_id,))
 		else:
 			raise ValueError('Unsupported cycle length: {}'.format(cycle_length))
 
 		ans = list(self.cursor.fetchall())
 		logger.info('Found {} cycles of length {}'.format(len(ans),cycle_length))
+		return ans
 
 
 	def get_simulation(self,snapshot_id,failing_project,random_seed=None,force_create=False,**sim_cfg):
@@ -669,4 +819,18 @@ class Database(object):
 		Limits the output to max_size elements if the parameter is not None.
 		'''
 		pass
+
+	def register_simulation(self,simulation):
+		'''
+		Registers a simulation object into the database
+		If results are available, puts results as well
+		'''
+		pass
+
+	def submit_simulation_results(self,simulation):
+		'''
+		Puts the results of given simulation in the database
+		'''
+		pass
+
 
