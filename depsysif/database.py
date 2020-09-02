@@ -171,7 +171,7 @@ class Database(object):
 				failing_project BIGINT REFERENCES projects(id) ON DELETE CASCADE
 				);
 
-				CREATE INDEX IF NOT EXISTS sim_algocfg ON simulations(sim_cfg) USING GIN(sim_cfg);
+				CREATE INDEX IF NOT EXISTS sim_algocfg ON simulations USING GIN(sim_cfg);
 				CREATE INDEX IF NOT EXISTS sim_time ON simulations(created_at);
 				CREATE INDEX IF NOT EXISTS sim_snapid ON simulations(snapshot_id);
 				CREATE INDEX IF NOT EXISTS sim_proj ON simulations(failing_project);
