@@ -2,6 +2,7 @@ import depsysif
 import pytest
 import datetime
 import os
+import time
 
 #### Parameters
 dbtype_list = [
@@ -22,6 +23,7 @@ def timestamp(request):
 
 @pytest.fixture(params=dbtype_list)
 def testdb(request):
+	time.sleep(0.1)
 	db = depsysif.database.Database(db_name='travis_ci_test_depsysif',db_type=request.param)
 	db.clean_db()
 	db.init_db()
@@ -56,7 +58,6 @@ def test_register_simulation(testdb,timestamp):
 	net = testdb.get_network(snapshot_time=timestamp)
 	sim = depsysif.simulations.Simulation(network=net,failing_project=1)
 	snapid = testdb.get_snapshot_id(snapshot_time=timestamp)
-	# raise Exception(snapid)
 	testdb.register_simulation(simulation=sim,snapshot_id=snapid)
 
 
