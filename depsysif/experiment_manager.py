@@ -14,6 +14,12 @@ class ExperimentManager(object):
 		else:
 			self.db = Database(**kwargs)
 
+	def list_snapshots(self):
+		'''
+		Listing snapshots, ordered by timestamp
+		'''
+		self.db.cursor.execute('SELECT id,created_at,name,full_network ORDER BY created_at,full_network;')
+		return self.db.cursor.fetchall()
 
 	def get_simulation(self,snapshot_id,failing_project,random_seed=None,force_create=False,executed=None,**sim_cfg):
 		'''
@@ -33,12 +39,16 @@ class ExperimentManager(object):
 		pass
 
 
+	def run_simulations(self,snapshot_id=None,snapshot_time=None,full_network=False,nb_sim=100,**sim_cfg):
+		'''
+		checking existing simulations, creating new ones if necessary, executing the ones that are not executed yet
+		'''
+		pass
 
-	# def __getattr__(self,arg):
-	# 	'''
-	# 	Falling back on database object to avoid reimplementing parts of the interface.
-	# 	'''
-	# 	if hasattr(self.db,attr):
-	# 		return getattr(self.db,attr)
-	# 	else:
-	# 		raise AttributeError('No such attribute for class {}: {}'.format(self.__class__,attr))
+	def get_results(self,snapshot_id=None,snapshot_time=None,full_network=False,nb_sim=100,**sim_cfg):
+		'''
+		Batch getting the results of the simulations.
+		Returns a vector of IDs + a sparse binary matrix
+		'''
+		self.run_simulations(snapshot_id=snapshot_id,snapshot_time=snapshot_time,nb_sim=nb_sim,full_network=full_network,**sim_cfg)
+

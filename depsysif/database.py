@@ -80,7 +80,7 @@ class Database(object):
 				CREATE TABLE IF NOT EXISTS snapshots(
 				id INTEGER PRIMARY KEY,
 				name TEXT,
-				full_network BOOL NOT NULL,
+				full_network BOOLEAN NOT NULL,
 				snapshot_time DATE NOT NULL,
 				UNIQUE(snapshot_time,full_network)
 				);
@@ -102,7 +102,7 @@ class Database(object):
 				created_at DATE DEFAULT CURRENT_TIMESTAMP,
 				sim_cfg TEXT,
 				random_seed INTEGER,
-				executed BOOL DEFAULT false,
+				executed BOOLEAN DEFAULT false,
 				failing_project INTEGER REFERENCES projects(id) ON DELETE CASCADE,
 				UNIQUE(snapshot_id,sim_cfg,random_seed,failing_project)
 				);
@@ -895,7 +895,7 @@ class Database(object):
 						INSERT INTO simulation_results(simulation_id,failing)
 						VALUES(%s,%s)
 						;''',((sim_id,fp) for fp in simulation.results['ids']))
-					self.cursor.execute('''UPDATE simulations SET executed=TRUE WHERE id=%s;''',(sim_id,))
+					self.cursor.execute('''UPDATE simulations SET executed=1 WHERE id=%s;''',(sim_id,))
 			else:
 				self.cursor.execute('''SELECT id FROM simulations
 								WHERE snapshot_id=?
@@ -914,6 +914,6 @@ class Database(object):
 						VALUES(?,?)
 						;''',((sim_id,fp) for fp in simulation.results['ids']))
 
-					self.cursor.execute('''UPDATE simulations SET executed=TRUE WHERE id=?;''',(sim_id,))
+					self.cursor.execute('''UPDATE simulations SET executed=1 WHERE id=?;''',(sim_id,))
 			self.connection.commit()
 

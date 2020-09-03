@@ -23,7 +23,7 @@ def timestamp(request):
 
 @pytest.fixture(params=dbtype_list)
 def testdb(request):
-	time.sleep(0.1)
+	time.sleep(0.2)
 	db = depsysif.database.Database(db_name='travis_ci_test_depsysif',db_type=request.param)
 	db.clean_db()
 	db.init_db()
