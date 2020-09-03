@@ -895,7 +895,7 @@ class Database(object):
 						INSERT INTO simulation_results(simulation_id,failing)
 						VALUES(%s,%s)
 						;''',((sim_id,fp) for fp in simulation.results['ids']))
-					self.cursor.execute('''UPDATE simulations SET executed=1 WHERE id=%s;''',(sim_id,))
+					self.cursor.execute('''UPDATE simulations SET executed=TRUE WHERE id=%s;''',(sim_id,))
 			else:
 				self.cursor.execute('''SELECT id FROM simulations
 								WHERE snapshot_id=?
