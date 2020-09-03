@@ -609,7 +609,10 @@ class Database(object):
 
 		else:
 			if snapshot_time is None:
-				self.cursor.execute('SELECT MAX(created_at) FROM versions;')
+				if self.db_type == 'postgres':
+					self.cursor.execute('''SELECT MAX(created_at) + interval '1 second' FROM versions;''')
+				else:
+					self.cursor.execute('''SELECT DATETIME(MAX(created_at),'+1 second') FROM versions;''')
 				snapshot_time = self.cursor.fetchone()[0]
 
 			snapshot_time = utils.clean_timestamp(snapshot_time)
@@ -853,7 +856,7 @@ class Database(object):
 				self.cursor.execute(''' INSERT INTO simulations(snapshot_id,sim_cfg,random_seed,failing_project)
 					VALUES(%s,%s,%s,%s)
 					ON CONFLICT DO NOTHING;
-					;''',(snapshot_id,simulation.sim_cfg,simulation.random_seed,simulation.failing_project))
+					;''',(snapshot_id,json.dumps(simulation.sim_cfg, indent=None, sort_keys=False),simulation.random_seed,simulation.failing_project))
 			else:
 				self.cursor.execute('''INSERT OR IGNORE INTO simulations(snapshot_id,sim_cfg,random_seed,failing_project)
 					VALUES(?,?,?,?)
@@ -881,7 +884,7 @@ class Database(object):
 								AND sim_cfg=%s
 								AND random_seed=%s
 								AND failing_project=%s
-					;''',(snapshot_id,simulation.sim_cfg,simulation.random_seed,simulation.failing_project))
+					;''',(snapshot_id,json.dumps(simulation.sim_cfg, indent=None, sort_keys=False),simulation.random_seed,simulation.failing_project))
 
 				sim_id_list = self.cursor.fetchone()
 				if sim_id_list is None:

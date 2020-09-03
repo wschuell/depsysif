@@ -34,6 +34,14 @@ def testdb(request):
 
 #### Tests
 
+def test_network(testdb,timestamp):
+	net = testdb.get_network(snapshot_time=timestamp)
+
+def test_cycles(testdb,timestamp):
+	net = testdb.get_network(snapshot_time=timestamp)
+	snapid = testdb.get_snapshot_id(snapshot_time=timestamp)
+	assert testdb.detect_cycles(snapshot_id=snapid) == []
+
 def test_create_simulation(testdb,timestamp):
 	net = testdb.get_network(snapshot_time=timestamp)
 	sim = depsysif.simulations.Simulation(network=net,failing_project=1)
@@ -48,6 +56,7 @@ def test_register_simulation(testdb,timestamp):
 	net = testdb.get_network(snapshot_time=timestamp)
 	sim = depsysif.simulations.Simulation(network=net,failing_project=1)
 	snapid = testdb.get_snapshot_id(snapshot_time=timestamp)
+	# raise Exception(snapid)
 	testdb.register_simulation(simulation=sim,snapshot_id=snapid)
 
 

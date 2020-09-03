@@ -17,4 +17,4 @@ def clean_timestamp(t):
 		except:
 			raise ValueError('Unknown timestamp format {} : Should be datetime object, or YYYY-MM-DD or YYYY-MM-DD HH:MM:SS'.format(t))
 	else:
-		return t
+		return t.replace(microsecond=0)
