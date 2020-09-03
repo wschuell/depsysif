@@ -6,6 +6,7 @@ import psycopg2
 from psycopg2 import extras
 import networkx as nx
 import csv
+import json
 
 logger = logging.getLogger(__name__)
 ch = logging.StreamHandler()
@@ -24,7 +25,7 @@ class Database(object):
 	By default SQLite is used, but PostgreSQL is also an option
 	'''
 
-	def __init__(self,db_type='sqlite',db_name='depsysif',db_folder='.',db_user='postgres',port='5432',host='localhost',password=None):
+	def __init__(self,db_type='sqlite',db_name='depsysif',db_folder='.',db_user='postgres',port='5432',host='localhost',password=None,clean_first=False):
 		self.db_type = db_type
 		if db_type == 'sqlite':
 			self.connection = sqlite3.connect(os.path.join(db_folder,'{}.db'.format(db_name)))
@@ -37,6 +38,8 @@ class Database(object):
 		else:
 			raise ValueError('Unknown DB type: {}'.format(db_type))
 
+		if clean_first:
+			self.clean_db()
 		self.init_db()
 
 	def init_db(self):
@@ -97,12 +100,16 @@ class Database(object):
 				created_at DATE DEFAULT CURRENT_TIMESTAMP,
 				sim_cfg TEXT,
 				random_seed INTEGER,
-				failing_project INTEGER REFERENCES projects(id) ON DELETE CASCADE
+				executed BOOL DEFAULT false,
+				failing_project INTEGER REFERENCES projects(id) ON DELETE CASCADE,
+				UNIQUE(snapshot_id,sim_cfg,random_seed,failing_project)
 				);
 
 				CREATE INDEX IF NOT EXISTS sim_algocfg ON simulations(sim_cfg);
 				CREATE INDEX IF NOT EXISTS sim_time ON simulations(created_at);
 				CREATE INDEX IF NOT EXISTS sim_snapid ON simulations(snapshot_id);
+				CREATE INDEX IF NOT EXISTS sim_seed ON simulations(snapshot_id,random_seed);
+				CREATE INDEX IF NOT EXISTS sim_exec ON simulations(snapshot_id,executed);
 				CREATE INDEX IF NOT EXISTS sim_proj ON simulations(failing_project);
 				CREATE INDEX IF NOT EXISTS sim_snapid_proj ON simulations(snapshot_id,failing_project);
 
@@ -169,12 +176,16 @@ class Database(object):
 				created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 				sim_cfg JSONB,
 				random_seed BIGINT,
-				failing_project BIGINT REFERENCES projects(id) ON DELETE CASCADE
+				executed BOOLEAN DEFAULT false,
+				failing_project BIGINT REFERENCES projects(id) ON DELETE CASCADE,
+				UNIQUE(snapshot_id,sim_cfg,random_seed,failing_project)
 				);
 
 				CREATE INDEX IF NOT EXISTS sim_algocfg ON simulations USING GIN(sim_cfg);
 				CREATE INDEX IF NOT EXISTS sim_time ON simulations(created_at);
 				CREATE INDEX IF NOT EXISTS sim_snapid ON simulations(snapshot_id);
+				CREATE INDEX IF NOT EXISTS sim_seed ON simulations(snapshot_id,random_seed);
+				CREATE INDEX IF NOT EXISTS sim_exec ON simulations(snapshot_id,executed);
 				CREATE INDEX IF NOT EXISTS sim_proj ON simulations(failing_project);
 				CREATE INDEX IF NOT EXISTS sim_snapid_proj ON simulations(snapshot_id,failing_project);
 
@@ -554,6 +565,37 @@ class Database(object):
 		#Final commit to the DB
 		self.connection.commit()
 
+	def get_project_id(self,project_name):
+		'''
+		returns the id of a project given the name
+		'''
+		if self.db_type == 'postgres':
+			self.cursor.execute('SELECT id FROM projects WHERE name=%s;',(project_name,))
+		else:
+			self.cursor.execute('SELECT id FROM projects WHERE name=?;',(project_name,))
+		ans = list(self.cursor.fetchall())
+		if len(ans)==0:
+			raise ValueError('No project with name {}'.format(project_name))
+		elif len(ans)>1:
+			raise ValueError('Several projects with name {}: {}'.format(project_name,len(ans)))
+		else:
+			return ans[0][0]	
+
+	def get_project_name(self,project_id):
+		'''
+		returns the name of a project given the id
+		'''
+		if self.db_type == 'postgres':
+			self.cursor.execute('SELECT name FROM projects WHERE id=%s;',(project_id,))
+		else:
+			self.cursor.execute('SELECT name FROM projects WHERE id=?;',(project_id,))
+		ans = self.cursor.fetchone()
+		if ans is None:
+			raise ValueError('No project with id {}'.format(project_id))
+		else:
+			return ans[0]
+
+
 	def get_snapshot_id(self,snapshot_name=None,snapshot_time=None,full_network=False):
 		'''
 		Returns the id if existing, None otherwise
@@ -634,12 +676,14 @@ class Database(object):
 		Returns a snapshotted network in the form of an edge list.
 		If no args are provided, max time is used. Otherwise name has priority.
 		If time is provided and does not exist in the database, build_snapshot is called.
+
+		NB: The network is directed, from projects using to projects used. Propagation of failure therefore goes up the links, not down
 		'''
 		if snapshot_id is not None:
 			if self.db_type == 'postgres':
-				self.cursor.execute('SELECT * FROM snapshots WHERE id=%s,',(snapshot_id,))
+				self.cursor.execute('SELECT * FROM snapshots WHERE id=%s;',(snapshot_id,))
 			else:
-				self.cursor.execute('SELECT * FROM snapshots WHERE id=?,',(snapshot_id,))
+				self.cursor.execute('SELECT * FROM snapshots WHERE id=?;',(snapshot_id,))
 			if self.cursor.fetchone() is None:
 				raise ValueError('Snapshot id not found in database: {}'.format(snapshot_id))
 			else:
@@ -667,7 +711,7 @@ class Database(object):
 		else:
 			return edge_list
 
-	def detect_cycles(self,snapshot_id,cycle_length):
+	def detect_cycles(self,snapshot_id,cycle_length=None):
 		'''
 		detecting cycles in a particular snapshot
 		Length 1,2,3 and 4 supported so far
@@ -795,42 +839,97 @@ class Database(object):
 							AND sd1.project_using<sd4.project_using -- uniqueness third step -- might be combined with other statements
 							AND sd4.project_used!=sd2.project_using  -- no 3-cycle in sd2-sd4
 						;''',(snapshot_id,snapshot_id,snapshot_id,snapshot_id,))
+		elif cycle_length is None:
+			net = self.get_network(snapshot_id=snapshot_id,as_nx_obj=True)
+			logger.info('Trying to find a cycle, of any length')
+			
+			if not nx.algorithms.dag.is_directed_acyclic_graph(net): # using this to have the fastest implementation in the longest running case: no cycles. Doubling the computation time when cycles are present, but anyway it takes way less time and should not be happening anyway.
+				cycle = nx.algorithms.cycles.find_cycle(net)
+				ans = [tuple([r[0] for r in cycle])]
+				logger.info('Found a cycle, of length {}: {}'.format(len(ans[0]),ans[0]))
+			else:
+				logger.info('No cycles found')
+				ans = []
 		else:
 			raise ValueError('Unsupported cycle length: {}'.format(cycle_length))
 
-		ans = list(self.cursor.fetchall())
-		logger.info('Found {} cycles of length {}'.format(len(ans),cycle_length))
+		if cycle_length is not None:
+			ans = list(self.cursor.fetchall())
+			logger.info('Found {} cycles of length {}'.format(len(ans),cycle_length))
 		return ans
 
 
-	def get_simulation(self,snapshot_id,failing_project,random_seed=None,force_create=False,**sim_cfg):
-		'''
-		Retrieves or creates a simulation, and returns the corresponding simulation object
-		'''
-		if not force_create:
-			pass
-			#detect if exists using list_simulations, returns sim_id
-
-
-	def list_simulations(self,snapshot_id,failing_project,max_size=None,**sim_cfg):
-		'''
-		Lists existing simulations with the corresponding parameters.
-		Returns empty list if none exist.
-		Limits the output to max_size elements if the parameter is not None.
-		'''
-		pass
-
-	def register_simulation(self,simulation):
+	def register_simulation(self,simulation,snapshot_id=None):
 		'''
 		Registers a simulation object into the database
 		If results are available, puts results as well
 		'''
-		pass
+		if snapshot_id is None:
+			snapshot_id = simulation.snapshot_id
+		if snapshot_id is None:
+			raise ValueError('Provide a snapshot_id to register the simulation, or set it within the simulation object, or get the simulation from an experiment manager object')
+		else:
+			if self.db_type == 'postgres':
+				self.cursor.execute(''' INSERT INTO simulations(snapshot_id,sim_cfg,random_seed,failing_project)
+					VALUES(%s,%s,%s,%s)
+					ON CONFLICT DO NOTHING;
+					;''',(snapshot_id,simulation.sim_cfg,simulation.random_seed,simulation.failing_project))
+			else:
+				self.cursor.execute('''INSERT OR IGNORE INTO simulations(snapshot_id,sim_cfg,random_seed,failing_project)
+					VALUES(?,?,?,?)
+					;''',(snapshot_id,json.dumps(simulation.sim_cfg, indent=None, sort_keys=False),simulation.random_seed,simulation.failing_project))
 
-	def submit_simulation_results(self,simulation):
+			if simulation.results is not None:
+				self.submit_simulation_results(simulation=simulation,snapshot_id=snapshot_id)
+			self.connection.commit()
+
+
+	def submit_simulation_results(self,simulation,snapshot_id=None):
 		'''
 		Puts the results of given simulation in the database
 		'''
-		pass
+		if snapshot_id is None:
+			snapshot_id = simulation.snapshot_id
+		if snapshot_id is None:
+			raise ValueError('Provide a snapshot_id to register the simulation, or set it within the simulation object, or get the simulation from an experiment manager object')
+		elif simulation.results is None:
+			logger.info('Simulation has no results to be submitted')
+		else:
+			if self.db_type == 'postgres':
+				self.cursor.execute('''SELECT id FROM simulations
+								WHERE snapshot_id=%s
+								AND sim_cfg=%s
+								AND random_seed=%s
+								AND failing_project=%s
+					;''',(snapshot_id,simulation.sim_cfg,simulation.random_seed,simulation.failing_project))
 
+				sim_id = self.cursor.fetchone()[0]
+				if sim_id is None:
+					self.register_simulation(simulation=simulation,snapshot_id=snapshot_id)
+				else:
+					extras.execute_batch(self.cursor,'''
+						INSERT INTO simulation_results(simulation_id,failing)
+						VALUES(%s,%s)
+						;''',((sim_id,fp) for fp in simulation.results['ids']))
+					self.cursor.execute('''UPDATE simulations SET executed=true WHERE id=%s;''',(sim_id,))
+			else:
+				self.cursor.execute('''SELECT id FROM simulations
+								WHERE snapshot_id=?
+								AND sim_cfg=?
+								AND random_seed=?
+								AND failing_project=?
+					;''',(snapshot_id,json.dumps(simulation.sim_cfg, indent=None, sort_keys=False),simulation.random_seed,simulation.failing_project))
+				
+				sim_id = self.cursor.fetchone()[0]
+				if sim_id is None:
+					self.register_simulation(simulation=simulation,snapshot_id=snapshot_id)
+				else:
+					self.cursor.executemany('''
+						INSERT INTO simulation_results(simulation_id,failing)
+						VALUES(?,?)
+						;''',((sim_id,fp) for fp in simulation.results['ids']))
 
+					self.cursor.execute('''UPDATE simulations SET executed=true WHERE id=?;''',(sim_id,))
+			self.connection.commit()
+
+			
