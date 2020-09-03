@@ -24,7 +24,7 @@ def fullnetwork(request):
 date_list = [
 	'2014-01-05',
 	'2014-02-05 00:11:22',
-	datetime.datetime.now()
+	datetime.datetime(2020, 9, 3, 19, 30, 58, 338646)
 	]
 @pytest.fixture(params=date_list)
 def timestamp(request):
@@ -65,9 +65,9 @@ def test_filldb(dbtype):
 	db.fill_from_csv(folder=csv_folder,headers_present=True)
 
 def test_snapshot(testdb,timestamp,fullnetwork):
-	testdb.build_snapshot(t=timestamp,full_network=fullnetwork)
+	testdb.build_snapshot(snapshot_time=timestamp,full_network=fullnetwork)
 
 
 def test_snapshot_getnet(testdb,timestamp,fullnetwork):
-	testdb.build_snapshot(t=timestamp,full_network=fullnetwork)
+	testdb.build_snapshot(snapshot_time=timestamp,full_network=fullnetwork)
 	testdb.get_network(snapshot_time=timestamp,full_network=fullnetwork)

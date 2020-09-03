@@ -17,6 +17,8 @@ logger.addHandler(ch)
 logger.setLevel(logging.INFO)
 
 
+from . import utils
+
 class Database(object):
 	'''
 	A simple database to store the data and query it efficiently.
@@ -358,8 +360,8 @@ class Database(object):
 			logger.info('Table dependencies already filled')
 		else:
 			logger.info('Filling dependencies from {}'.format(database))
-			
-			
+
+
 			libio_cursor.execute(''' SELECT version_id,dependency_project_id FROM dependencies
 											WHERE (NOT %s OR NOT optional_dependency)
 											AND (NOT %s OR platform=%s)
@@ -418,7 +420,7 @@ class Database(object):
 					extras.execute_batch(self.cursor,'INSERT INTO versions(id,name,project_id,created_at) VALUES(%s,%s,%s,%s) ON CONFLICT DO NOTHING;',reader)
 				else:
 					self.cursor.executemany('INSERT OR IGNORE INTO versions(id,name,project_id,created_at) VALUES(?,?,?,?);',reader)
-	
+
 				self.connection.commit()
 			logger.info('Filled versions')
 
@@ -427,9 +429,9 @@ class Database(object):
 			logger.info('Table dependencies already filled')
 		else:
 			logger.info('Filling dependencies from file {}'.format(dependencies_file))
-			
-			
-			
+
+
+
 			with open(os.path.join(folder,dependencies_file),'r') as f:
 				reader = csv.reader(f,delimiter=delimiter)
 				if headers_present:
@@ -439,13 +441,13 @@ class Database(object):
 					extras.execute_batch(self.cursor,'INSERT INTO dependencies(version_id,project_id) VALUES(%s,%s) ON CONFLICT DO NOTHING;',reader)
 				else:
 					self.cursor.executemany('INSERT OR IGNORE INTO dependencies(version_id,project_id) VALUES(?,?);',reader)
-	
+
 				self.connection.commit()
 			logger.info('Filled dependencies')
 
 
 
-	def build_snapshot(self,t,full_network=False,name=None):
+	def build_snapshot(self,snapshot_time,full_network=False,name=None):
 		'''
 		Build a snapshot in the database, by reference to a datetime object t.
 		If t is a string, intenting to convert it to datetime first.
@@ -455,18 +457,7 @@ class Database(object):
 		'''
 
 		# Converting timestamp if necessary
-		if isinstance(t,str):
-			try:
-				if len(t) == 10:
-					snapshot_time = datetime.datetime.strptime(t, '%Y-%m-%d')
-				elif len(t) == 19:
-					snapshot_time = datetime.datetime.strptime(t, '%Y-%m-%d %H:%M:%S')
-				else:
-					raise Exception # Just used to trigger the error handling, the specific message is only written once this way
-			except:
-				raise ValueError('Unknown timestamp format {} : Should be datetime object, or YYYY-MM-DD or YYYY-MM-DD HH:MM:SS'.format(t))
-		else:
-			snapshot_time = t
+		snapshot_time = utils.clean_timestamp(snapshot_time)
 
 
 
@@ -579,7 +570,7 @@ class Database(object):
 		elif len(ans)>1:
 			raise ValueError('Several projects with name {}: {}'.format(project_name,len(ans)))
 		else:
-			return ans[0][0]	
+			return ans[0][0]
 
 	def get_project_name(self,project_id):
 		'''
@@ -596,12 +587,14 @@ class Database(object):
 			return ans[0]
 
 
-	def get_snapshot_id(self,snapshot_name=None,snapshot_time=None,full_network=False):
+	def get_snapshot_id(self,snapshot_id=None,snapshot_name=None,snapshot_time=None,full_network=False,create=True):
 		'''
 		Returns the id if existing, None otherwise
 		If no args are provided for the time, max time is used. Otherwise name has priority.
 		'''
-		if snapshot_name is not None:
+		if snapshot_id is not None:
+			return snapshot_id
+		elif snapshot_name is not None:
 			if self.db_type == 'postgres':
 				self.cursor.execute('SELECT id FROM snapshots WHERE name=%s;',(snapshot_name,))
 			else:
@@ -619,21 +612,26 @@ class Database(object):
 				self.cursor.execute('SELECT MAX(created_at) FROM versions;')
 				snapshot_time = self.cursor.fetchone()[0]
 
+			snapshot_time = utils.clean_timestamp(snapshot_time)
+
 			if self.db_type == 'postgres':
 				self.cursor.execute('SELECT id FROM snapshots WHERE full_network=%s AND snapshot_time=%s;',(full_network,snapshot_time))
 			else:
-				self.cursor.execute('SELECT id FROM snapshots WHERE full_network=? AND snapshot_time=(SELECT DATETIME(?));',(full_network,snapshot_time))
+				self.cursor.execute('SELECT id FROM snapshots WHERE full_network=? AND (SELECT DATETIME(snapshot_time))=(SELECT DATETIME(?));',(full_network,snapshot_time))
 
 			id_list = [r[0] for r in self.cursor.fetchall()]
 			if len(id_list)==1:
 				return id_list[0]
 			elif len(id_list) > 1:
 				raise ValueError('The database returned several ({}) snapshots for the parameters: full_network {}, snapshot_time {}'.format(len(id_list),full_network, snapshot_time))
+			elif create:
+				self.build_snapshot(snapshot_time=snapshot_time,full_network=full_network)
+				return self.get_snapshot_id(snapshot_time=snapshot_time,full_network=full_network)
 			else:
-				return None
+				raise ValueError('No snapshot corresponding to description: snapshot name {}, snapshot_time {}, full_network {}'.format(snapshot_name,snapshot_time,full_network))
 
 
-	def get_nodes(self,snapshot_id=None,snapshot_time=None):
+	def get_nodes(self,snapshot_id=None,snapshot_time=None,full_network=False):
 		'''
 		Gets the list of existing projects at a given time, or at the time of a given snapshot
 		Based on 'created_at' attribute of projects
@@ -652,16 +650,11 @@ class Database(object):
 			else:
 				print(query_result)
 				snaptime = query_result[0]
-		if isinstance(snaptime,str):
-			try:
-				if len(snaptime) == 10:
-					snaptime = datetime.datetime.strptime(snaptime, '%Y-%m-%d')
-				elif len(snaptime) == 19:
-					snaptime = datetime.datetime.strptime(snaptime, '%Y-%m-%d %H:%M:%S')
-				else:
-					raise Exception # Just used to trigger the error handling, the specific message is only written once this way
-			except:
-				raise ValueError('Unknown timestamp format {} : Should be datetime object, or YYYY-MM-DD or YYYY-MM-DD HH:MM:SS'.format(snaptime))
+		else:
+			raise ValueError('You should provide either snapshot_id or snapshot_time')
+
+		snaptime = utils.clean_timestamp(snaptime)
+
 		logger.info('Getting nodes at time {}'.format(snaptime.strftime('%Y-%m-%d %H:%M:%S')))
 		if self.db_type == 'postgres':
 			self.cursor.execute('SELECT id FROM projects WHERE created_at<=%s;',(snaptime,))
@@ -671,7 +664,7 @@ class Database(object):
 
 
 
-	def get_network(self,snapshot_id=None,snapshot_name=None,snapshot_time=None,full_network=False,as_nx_obj=False):
+	def get_network(self,snapshot_id=None,snapshot_name=None,snapshot_time=None,full_network=False,as_nx_obj=True,create=True):
 		'''
 		Returns a snapshotted network in the form of an edge list.
 		If no args are provided, max time is used. Otherwise name has priority.
@@ -679,20 +672,7 @@ class Database(object):
 
 		NB: The network is directed, from projects using to projects used. Propagation of failure therefore goes up the links, not down
 		'''
-		if snapshot_id is not None:
-			if self.db_type == 'postgres':
-				self.cursor.execute('SELECT * FROM snapshots WHERE id=%s;',(snapshot_id,))
-			else:
-				self.cursor.execute('SELECT * FROM snapshots WHERE id=?;',(snapshot_id,))
-			if self.cursor.fetchone() is None:
-				raise ValueError('Snapshot id not found in database: {}'.format(snapshot_id))
-			else:
-				snapid = snapshot_id
-		else:
-			snapid = self.get_snapshot_id(snapshot_name=snapshot_name,snapshot_time=snapshot_time,full_network=full_network)
-			if snapid is None:
-				self.build_snapshot(t=snapshot_time,full_network=full_network,name=snapshot_name)
-				snapid = self.get_snapshot_id(snapshot_name=snapshot_name,snapshot_time=snapshot_time,full_network=full_network)
+		snapid = self.get_snapshot_id(snapshot_id=snapshot_id,snapshot_name=snapshot_name,snapshot_time=snapshot_time,full_network=full_network,create=create)
 
 		logger.info('Getting elements of snapshot {}'.format(snapid))
 
@@ -704,7 +684,7 @@ class Database(object):
 		edge_list = list(self.cursor.fetchall()) # Could be used/returned as a generator
 		if as_nx_obj:
 			g = nx.DiGraph()
-			node_list = self.get_nodes(snapshot_id=snapid)
+			node_list = self.get_nodes(snapshot_id=snapid,snapshot_time=snapshot_time)
 			g.add_nodes_from(node_list)
 			g.add_edges_from(edge_list)
 			return g
@@ -842,7 +822,7 @@ class Database(object):
 		elif cycle_length is None:
 			net = self.get_network(snapshot_id=snapshot_id,as_nx_obj=True)
 			logger.info('Trying to find a cycle, of any length')
-			
+
 			if not nx.algorithms.dag.is_directed_acyclic_graph(net): # using this to have the fastest implementation in the longest running case: no cycles. Doubling the computation time when cycles are present, but anyway it takes way less time and should not be happening anyway.
 				cycle = nx.algorithms.cycles.find_cycle(net)
 				ans = [tuple([r[0] for r in cycle])]
@@ -903,10 +883,11 @@ class Database(object):
 								AND failing_project=%s
 					;''',(snapshot_id,simulation.sim_cfg,simulation.random_seed,simulation.failing_project))
 
-				sim_id = self.cursor.fetchone()[0]
-				if sim_id is None:
+				sim_id_list = self.cursor.fetchone()
+				if sim_id_list is None:
 					self.register_simulation(simulation=simulation,snapshot_id=snapshot_id)
 				else:
+					sim_id = sim_id_list[0]
 					extras.execute_batch(self.cursor,'''
 						INSERT INTO simulation_results(simulation_id,failing)
 						VALUES(%s,%s)
@@ -919,11 +900,12 @@ class Database(object):
 								AND random_seed=?
 								AND failing_project=?
 					;''',(snapshot_id,json.dumps(simulation.sim_cfg, indent=None, sort_keys=False),simulation.random_seed,simulation.failing_project))
-				
-				sim_id = self.cursor.fetchone()[0]
-				if sim_id is None:
+
+				sim_id_list = self.cursor.fetchone()
+				if sim_id_list is None:
 					self.register_simulation(simulation=simulation,snapshot_id=snapshot_id)
 				else:
+					sim_id = sim_id_list[0]
 					self.cursor.executemany('''
 						INSERT INTO simulation_results(simulation_id,failing)
 						VALUES(?,?)
@@ -932,4 +914,3 @@ class Database(object):
 					self.cursor.execute('''UPDATE simulations SET executed=true WHERE id=?;''',(sim_id,))
 			self.connection.commit()
 
-			
