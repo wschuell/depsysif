@@ -67,6 +67,9 @@ def test_filldb(dbtype):
 def test_snapshot(testdb,timestamp,fullnetwork):
 	testdb.build_snapshot(snapshot_time=timestamp,full_network=fullnetwork)
 
+def test_id(testdb,timestamp,fullnetwork):
+	testdb.build_snapshot(snapshot_time=timestamp,full_network=fullnetwork)
+	testdb.get_snapshot_id(snapshot_time=timestamp,full_network=fullnetwork)
 
 def test_snapshot_getnet(testdb,timestamp,fullnetwork):
 	testdb.build_snapshot(snapshot_time=timestamp,full_network=fullnetwork)
