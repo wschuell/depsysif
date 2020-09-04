@@ -76,3 +76,11 @@ def test_submit_with_snapid_set(testdb,timestamp):
 	sim.run()
 	sim.snapshot_id = snapid
 	testdb.submit_simulation_results(simulation=sim,snapshot_id=snapid)
+
+def test_exp_manager(testdb,timestamp):
+	xp_man = depsysif.experiment_manager.ExperimentManager(db=testdb)
+	xp_man.run_simulations(snapshot_time=timestamp,nb_sim=10,failing_project=1)
+
+def test_exp_manager_allprojects(testdb,timestamp):
+	xp_man = depsysif.experiment_manager.ExperimentManager(db=testdb)
+	xp_man.run_simulations(snapshot_time=timestamp,nb_sim=10,failing_project=None)

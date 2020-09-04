@@ -18,9 +18,9 @@ class Simulation(object):
 	Simulation objects simulate cascades of failures in projects through the dependency hierarchy
 	'''
 	def __init__(self,failing_project,network=None,propag_proba=0.9,norm_exponent=0.,random_seed=None,verbose=False,snapshot_id=None):
-		if network is not None:
-			self.set_network(network=network)
-		
+
+		self.set_network(network=network) # can potentially be None
+
 		if random_seed is None:
 			self.random_seed = np.random.randint(2**32-1)
 		else:
@@ -38,6 +38,19 @@ class Simulation(object):
 
 		self.failing_project = failing_project
 
+	def set_network(self,network):
+		self.network = network
+
+	def set_from_edge_list(self,edge_list,node_list=None):
+		'''
+		Similar as set_network, but from an edge list
+		Can be useful for different implementations (eg sparse matrices)
+		'''
+		self.network = nx.DiGraph()
+		if node_list is not None:
+			self.network.add_nodes_from(node_list)
+		self.network.add_edges_from(edge_list)
+
 	def reset_random_generator(self):
 		self.random_generator = np.random.RandomState(self.random_seed)
 
@@ -46,7 +59,7 @@ class Simulation(object):
 		Given a specific node, computes a resulting vector of failed nodes, based on probabilistic process.
 		Calling the propagate method for each new failed node, and iterating
 		NB: indexing is used to keep track of the order of nodes vs. their origin IDs. This might already be done automatically in networkx, and using it could reduce computation time
-		
+
 		NB2: project_id is optional, and should in general not be used, as a default failing project exists already.
 		This is just possible when you want to manually run simulations with different sources without recreating the object each time.
 		A possible option would be to change the attribute self.failing_project to this, to automatically be able to submit the right results and simulation when needed
@@ -58,22 +71,22 @@ class Simulation(object):
 			total_nodes = len(self.network.nodes())
 			index_nodes = {i:n for i,n in enumerate(sorted(self.network.nodes()))} # building indexes to match order in the vector and id in network
 			index_reverse = {n:i for i,n in enumerate(sorted(self.network.nodes()))} # sorted ensures that the process is deterministic (given the random seed)
-			
+
 			# failed nodes and new_failed are vectors with ones (instead of sets or dicts)
 			# initial state: a one only for the source project
 			if project_id is None:
 				project_id = self.failing_project
 			project_nb = index_reverse[project_id]
-			
+
 			failed_nodes = np.zeros((total_nodes,),dtype=np.bool)
 			failed_nodes[project_nb] = 1
 
 			new_failed = np.zeros((total_nodes,),dtype=np.bool)
 			new_failed[project_nb] = 1
-			
-	
+
+
 			iteration = 0
-	
+
 			while new_failed.sum()>0:
 				iteration += 1
 				source_nb_list = np.where(new_failed>0)[0]
@@ -93,7 +106,7 @@ class Simulation(object):
 	def propagate(self,source_id):
 		'''
 		propagation from one node to its neighbors
-		
+
 		NB: The network is directed, from projects using to projects used. Propagation of failure therefore goes up the links, not down
 		'''
 		ans = set()
@@ -113,18 +126,6 @@ class Simulation(object):
 			project_id = self.failing_project
 		pass
 
-	def set_network(self,network):
-		self.network = network
-
-	def set_from_edge_list(self,edge_list,node_list=None):
-		'''
-		Similar as set_network, but from an edge list
-		Can be useful for different implementations (eg sparse matrices)
-		'''
-		self.network = nx.DiGraph()
-		if node_list is not None:
-			self.network.add_nodes_from(node_list)
-		self.network.add_edges_from(edge_list)
 
 	def make_copies(self,nb=1):
 		'''
