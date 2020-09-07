@@ -132,28 +132,170 @@ class ExperimentManager(object):
 
 		return np.asarray(sorted(self.db.get_nodes(snapshot_id=snapshot_id)))
 
-	def get_results(self,snapshot_id=None,snapshot_time=None,full_network=False,nb_sim=100,failing_project=None,**sim_cfg):
+	def get_results(self,snapshot_id=None,snapshot_time=None,full_network=False,nb_sim=100,failing_project=None,result_type='counts',**sim_cfg):
 		'''
 		Batch getting the results of the simulations.
 		Returns a vector of IDs +a vector of source IDs + a sparse binary matrix
 		Alternatively output could be a pandas dataframe?
 		'''
 		snapid = self.db.get_snapshot_id(snapshot_id=snapshot_id,snapshot_time=snapshot_time,full_network=full_network,create=True)
-		vec = self.get_id_vector(snapshot_id=snapid)
+		id_vec = self.get_id_vector(snapshot_id=snapid)
 		self.run_simulations(snapshot_id=snapid,nb_sim=nb_sim,failing_project=failing_project,**sim_cfg)
-		if failing_project is not None:
+		if failing_project is None:
+			return self.get_results_full(snapshot_id=snapid,nb_sim=100,result_type=result_type,**sim_cfg)
+		else:
 			sim_list = self.list_simulations(failing_project=failing_project,snapshot_id=snapid,max_size=nb_sim,**sim_cfg)
-			if self.db.db_type =='postgres':
-				self.db.cursor.execute('''
-					SELECT %s,failing FROM simulation_results
-						WHERE id IN %s
-					;''',(failing_project,tuple([s_id for s_id,exec_status in sim_list])))
-			else:
-				self.db.cursor.execute('''
-					SELECT ?,failing FROM simulation_results
-						WHERE id IN ?
-					;''',(failing_project,tuple([s_id for s_id,exec_status in sim_list])))
+			sim_id_list = sorted([s_id for s_id,exec_status in sim_list])
+			reverse_sim_index = {s:i for i,s in enumerate(sim_id_list)}
+			#### RAW
+			if result_type == 'raw'
+				if self.db.db_type =='postgres':
+					self.db.cursor.execute('''
+						SELECT simulation_id,failing FROM simulation_results
+							WHERE simulation_id IN %s
+							ORDER BY simulation_id,failing
+						;''',(tuple(sim_id_list),))
+				else:
+					self.db.cursor.execute('''
+						SELECT simulation_id,failing FROM simulation_results
+							WHERE simulation_id IN ?
+							ORDER BY simulation_id,failing
+						;''',(tuple(sim_id_list),))
 
-			results = sparse.lil_matrix((nb_nodes,nb_sim))
-			for fp, failing in self.db.cursor.fetchall():
-					pass
+				# results = sparse.coo_matrix((nb_nodes,nb_sim))
+				results_data = []
+				for s_id,fp in self.db.cursor.fetchall():
+					results_data.append((self.index_reverse[fp],reverse_sim_index[s_id],True))
+				results = scipy.sparse.coo_matrix(results_data,shape=(len(id_vec),nb_sim),dtype=np.bool).tocsr()
+				return results
+
+			#### COUNTS
+			elif result_type == 'counts':
+				if self.db.db_type =='postgres':
+					self.db.cursor.execute('''
+						SELECT COUNT(*),failing FROM simulation_results
+							WHERE simulation_id IN %s
+							GROUP BY failing
+						;''',(tuple(sim_id_list),))
+				else:
+					self.db.cursor.execute('''
+						SELECT COUNT(*),failing FROM simulation_results
+							WHERE simulation_id IN ?
+							GROUP BY failing
+						;''',(tuple(sim_id_list),))
+
+				# results = sparse.coo_matrix((nb_nodes,nb_sim))
+				results = np.zeros((len(id_vec),))
+				for val,fp in self.db.cursor.fetchall():
+					results[self.index_reverse[fp]] = val
+				return results
+			#### NB FAILING
+			elif result_type == 'nb_failing':
+				if self.db.db_type =='postgres':
+					self.db.cursor.execute('''
+						SELECT COUNT(*),simulation_id FROM simulation_results
+							WHERE simulation_id IN %s
+							GROUP BY simulation_id
+						;''',(tuple(sim_id_list),))
+				else:
+					self.db.cursor.execute('''
+						SELECT COUNT(*),simulation_id FROM simulation_results
+							WHERE simulation_id IN ?
+							GROUP BY simulation_id
+						;''',(tuple(sim_id_list),))
+
+				# results = sparse.coo_matrix((nb_nodes,nb_sim))
+				results = np.zeros((len(sim_id_list),))
+				for val,s_id in self.db.cursor.fetchall():
+					results[reverse_sim_index[s_id]] = val
+				return results
+			else:
+				raise ValueError('Unknown result_type: {}'.format(result_type))
+
+	def get_results_full(self,snapshot_id=None,snapshot_time=None,full_network=False,nb_sim=100,result_type='counts',**sim_cfg):
+		'''
+		Same as preceding method but aggregated over all possible source failed projects
+		'''
+		snapid = self.db.get_snapshot_id(snapshot_id=snapshot_id,snapshot_time=snapshot_time,full_network=full_network,create=True)
+		id_vec = self.get_id_vector(snapshot_id=snapid)
+		self.run_simulations(snapshot_id=snapid,nb_sim=nb_sim,failing_project=failing_project,**sim_cfg)
+		if failing_project is None:
+			return self.get_results_full(snapshot_id=snapid,nb_sim=100,result_type=result_type,**sim_cfg)
+		else:
+			sim_list = self.list_simulations(failing_project=failing_project,snapshot_id=snapid,max_size=nb_sim,**sim_cfg)
+			sim_id_list = sorted([s_id for s_id,exec_status in sim_list])
+			reverse_sim_index = {s:i for i,s in enumerate(sim_id_list)}
+			#### RAW
+			if result_type == 'raw'
+				if self.db.db_type =='postgres':
+					self.db.cursor.execute('''
+						SELECT sr.simulation_id,sr.failing,s.failing_project FROM simulation_results sr
+							INNER JOIN simulations s
+							ON sr.simulation_id IN %s AND s.id=sr.simulation_id
+							ORDER BY sr.simulation_id,sr.failing
+						;''',(tuple(sim_id_list),))
+				else:
+					self.db.cursor.execute('''
+						SELECT sr.simulation_id,sr.failing,s.failing_project FROM simulation_results sr
+							INNER JOIN simulations s
+							ON sr.simulation_id IN ? AND s.id=sr.simulation_id
+							ORDER BY sr.simulation_id,sr.failing
+						;''',(tuple(sim_id_list),))
+
+				# results = sparse.coo_matrix((nb_nodes,nb_sim))
+				results_data = []
+				for s_id,fp in self.db.cursor.fetchall():
+					results_data.append((self.index_reverse[fp],reverse_sim_index[s_id],True))
+				results = scipy.sparse.coo_matrix(results_data,shape=(len(id_vec),nb_sim),dtype=np.bool).tocsr()
+				return results
+
+			#### COUNTS
+			elif result_type == 'counts':
+				if self.db.db_type =='postgres':
+					self.db.cursor.execute('''
+						SELECT COUNT(*),sr.failing,s.failing_project  FROM simulation_results sr
+							INNER JOIN simulations s
+							ON sr.simulation_id IN %s AND s.id=sr.simulation_id
+							GROUP BY sr.failing,s.failing_project
+							ORDER BY sr.failing,s.failing_project
+						;''',(tuple(sim_id_list),))
+				else:
+					self.db.cursor.execute('''
+						SELECT COUNT(*),sr.failing,s.failing_project  FROM simulation_results sr
+							INNER JOIN simulations s
+							ON sr.simulation_id IN ? AND s.id=sr.simulation_id
+							GROUP BY sr.failing,s.failing_project
+							ORDER BY sr.failing,s.failing_project
+						;''',(tuple(sim_id_list),))
+
+				# results = sparse.coo_matrix((nb_nodes,nb_sim))
+				results = np.zeros((len(id_vec),))
+				for val,fp in self.db.cursor.fetchall():
+					results[self.index_reverse[fp]] = val
+				return results
+			#### NB FAILING
+			elif result_type == 'nb_failing':
+				if self.db.db_type =='postgres':
+					self.db.cursor.execute('''
+						SELECT COUNT(*),sr.simulation_id,s.failing_project  FROM simulation_results sr
+							INNER JOIN simulations s
+							ON sr.simulation_id IN %s AND s.id=sr.simulation_id
+							GROUP BY sr.simulation_id,s.failing_project
+							ORDER BY sr.simulation_id,s.failing_project
+						;''',(tuple(sim_id_list),))
+				else:
+					self.db.cursor.execute('''
+						SELECT COUNT(*),sr.simulation_id,s.failing_project  FROM simulation_results sr
+							INNER JOIN simulations s
+							ON sr.simulation_id IN ? AND s.id=sr.simulation_id
+							GROUP BY sr.simulation_id,s.failing_project
+							ORDER BY sr.simulation_id,s.failing_project
+						;''',(tuple(sim_id_list),))
+
+				# results = sparse.coo_matrix((nb_nodes,nb_sim))
+				results = np.zeros((len(sim_id_list),))
+				for val,s_id in self.db.cursor.fetchall():
+					results[reverse_sim_index[s_id]] = val
+				return results
+			else:
+				raise ValueError('Unknown result_type: {}'.format(result_type))

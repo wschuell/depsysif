@@ -19,7 +19,7 @@ class Simulation(object):
 	'''
 	Simulation objects simulate cascades of failures in projects through the dependency hierarchy
 	'''
-	def __init__(self,failing_project,network=None,propag_proba=0.9,norm_exponent=0.,implementation='classic',random_seed=None,verbose=False,snapshot_id=None):
+	def __init__(self,failing_project,network=None,propag_proba=0.9,norm_exponent=0.,implementation='classic',random_seed=None,verbose=False,snapshot_id=None,set_network=True):
 
 
 		if random_seed is None:
@@ -41,7 +41,8 @@ class Simulation(object):
 
 		self.failing_project = failing_project
 
-		self.set_network(network=network) # can potentially be None
+		if set_network:
+			self.set_network(network=network) # can potentially be None
 
 	def set_network(self,network):
 		'''
