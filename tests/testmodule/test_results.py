@@ -15,7 +15,6 @@ def dbtype(request):
 
 date_list = [
 	'2014-02-05 00:11:22',
-	datetime.datetime.now(),
 	]
 @pytest.fixture(params=date_list)
 def timestamp(request):
@@ -81,7 +80,8 @@ def norm_exponent(request):
 def test_exp_manager(testdb,timestamp):
 	xp_man = depsysif.experiment_manager.ExperimentManager(db=testdb)
 	xp_man.run_simulations(snapshot_time=timestamp,nb_sim=10)
-	xp_man.get_results(result_type='count')
-	xp_man.get_results(result_type='nb_failing')
-	xp_man.get_results_full(result_type='count')
-	xp_man.get_results_full(result_type='nb_failing')
+	snapid = testdb.get_snapshot_id(snapshot_id=timestamp)
+	xp_man.get_results(snapshot_id=snapid,result_type='count',failing_project=1,nb_sim=10)
+	xp_man.get_results(snapshot_id=snapid,result_type='nb_failing',failing_project=1,nb_sim=10)
+	xp_man.get_results_full(snapshot_id=snapid,result_type='count',nb_sim=10)
+	xp_man.get_results_full(snapshot_id=snapid,result_type='nb_failing',nb_sim=10)
