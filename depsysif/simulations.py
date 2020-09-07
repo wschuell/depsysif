@@ -158,7 +158,8 @@ class Simulation(object):
 						logger.info('Iteration {}, new failing {}, total failing {}, total nodes {}'.format(iteration,new_failed.sum(),failed_nodes.sum(),total_nodes))
 
 
-
+			else:
+				raise ValueError('Unknown implementation: {}'.format(implementation))
 
 
 			if full_results:
