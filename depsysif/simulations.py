@@ -53,7 +53,8 @@ class Simulation(object):
 			self.index_nodes = np.sort(self.network.nodes())
 			self.index_reverse = {n:i for i,n in enumerate(sorted(self.network.nodes()))} # sorted ensures that the process is deterministic (given the random seed)
 
-			norm_propag = 1./np.power(nx.to_scipy_sparse_matrix(network).sum(axis=0),self.norm_exponent)
+			with np.errstate(divide='ignore',invalid='ignore'):
+				norm_propag = 1./np.power(nx.to_scipy_sparse_matrix(network).sum(axis=0),self.norm_exponent)
 			self.propag_mat = nx.to_scipy_sparse_matrix(network).multiply(self.propag_proba/norm_propag).tocsr()
 			# self.propag_mat = nx.to_scipy_sparse_matrix(network).transpose().multiply(self.propag_proba/norm_propag).tocsr()
 			# self.propag_mat = nx.to_scipy_sparse_matrix(network).multiply(self.propag_proba/norm_propag).tocsr() # CHECK MULTIPLICATIONS ARE ALONG RIGHT DIMENSIONS

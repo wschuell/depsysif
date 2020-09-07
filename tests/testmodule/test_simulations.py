@@ -51,6 +51,28 @@ def testnetdb(request):
 	db.fill_from_csv(folder=csv_folder,headers_present=True)
 	return db
 
+
+propag_proba_list = [
+	0.1,
+	0.28,
+	0.5,
+	1
+	]
+@pytest.fixture(params=propag_proba_list)
+def propag_proba(request):
+	return request.param
+
+normexp_list = [
+	0,
+	1,
+	0.5,
+	0.3,
+	2
+	]
+@pytest.fixture(params=normexp_list)
+def norm_exponent(request):
+	return request.param
+
 ##############
 
 #### Tests
@@ -116,3 +138,11 @@ def test_simresult(testnetdb,implementation):
 	sim = depsysif.simulations.Simulation(network=net,failing_project=7,propag_proba=1,implementation=implementation)
 	sim.run()
 	assert sim.results['ids'] == [4,7]
+
+
+def test_sim_mat(testnetdb,propag_proba,norm_exponent):
+	net = testnetdb.get_network(snapshot_time=None) # when None, taking max time in db
+	sim = depsysif.simulations.Simulation(network=net,failing_project=3,propag_proba=propag_proba,norm_exponent=norm_exponent,implementation=implementation)
+	sim.propag_mat[2-1,3-1] == propag_proba
+	sim.propag_mat[2-1,5-1] == 0
+	sim.propag_mat[7-1,4-1] == propag_proba/2**norm_exponent
