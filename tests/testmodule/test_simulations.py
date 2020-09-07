@@ -21,9 +21,17 @@ date_list = [
 def timestamp(request):
 	return request.param
 
+implementation_list = [
+	'classic',
+	'matrix'
+	]
+@pytest.fixture(params=implementation_list)
+def implementation(request):
+	return request.param
+
 @pytest.fixture(params=dbtype_list)
 def testdb(request):
-	time.sleep(0.2)
+	time.sleep(0.5)
 	db = depsysif.database.Database(db_name='travis_ci_test_depsysif',db_type=request.param)
 	db.clean_db()
 	db.init_db()
@@ -49,9 +57,9 @@ def test_create_simulation(testdb,timestamp):
 	sim = depsysif.simulations.Simulation(network=net,failing_project=1)
 
 
-def test_run_simulation(testdb,timestamp):
+def test_run_simulation(testdb,timestamp,implementation):
 	net = testdb.get_network(snapshot_time=timestamp)
-	sim = depsysif.simulations.Simulation(network=net,failing_project=1)
+	sim = depsysif.simulations.Simulation(network=net,failing_project=1,implementation=implementation)
 	sim.run()
 
 def test_register_simulation(testdb,timestamp):
@@ -61,9 +69,9 @@ def test_register_simulation(testdb,timestamp):
 	testdb.register_simulation(simulation=sim,snapshot_id=snapid)
 
 
-def test_submit_results(testdb,timestamp):
+def test_submit_results(testdb,timestamp,implementation):
 	net = testdb.get_network(snapshot_time=timestamp)
-	sim = depsysif.simulations.Simulation(network=net,failing_project=1)
+	sim = depsysif.simulations.Simulation(network=net,failing_project=1,implementation=implementation)
 	snapid = testdb.get_snapshot_id(snapshot_time=timestamp)
 	sim.run()
 	testdb.submit_simulation_results(simulation=sim,snapshot_id=snapid)

@@ -3,6 +3,9 @@ from .simulations import Simulation
 
 import json
 import logging
+import numpy as np
+# from scipy import sparse
+import  scipy.sparse
 
 logger = logging.getLogger(__name__)
 ch = logging.StreamHandler()
@@ -32,14 +35,14 @@ class ExperimentManager(object):
 		self.db.cursor.execute('SELECT id,created_at,name,full_network ORDER BY created_at,full_network;')
 		return self.db.cursor.fetchall()
 
-	def get_simulation(self,snapshot_id,failing_project,random_seed=None,force_create=False,executed=None,**sim_cfg):
+	def get_simulation(self,snapshot_id,failing_project,**sim_cfg):
 		'''
-		Retrieves or creates a simulation, and returns the corresponding simulation object
-		if not existing and force_create, creating it, otherwise throwing error
+		Creates a simulation, and returns the corresponding simulation object
 		'''
-		if not force_create:
-			pass
-			#detect if exists using list_simulations, returns sim_id
+		sim_list = self.list_simulations(failing_project=failing_project,snapshot_id=snapshot_id)
+		network = self.db.get_network(snapshot_id=snapshot_id)
+		return Simulation(network=network,snapshot_id=snapshot_id,failing_project=failing_project,**sim_cfg)
+
 
 
 	def list_simulations(self,failing_project,snapshot_id=None,snapshot_time=None,full_network=False,max_size=None,**sim_cfg):
@@ -56,7 +59,7 @@ class ExperimentManager(object):
 					AND failing_project = %s
 					AND sim_cfg = %s
 				ORDER BY executed,id
-				LIMIT %s 
+				LIMIT %s
 				;''',(snapshot_id,failing_project,json.dumps(sim_cfg, indent=None, sort_keys=False),max_size))
 		else:
 			if max_size is None:
@@ -113,7 +116,7 @@ class ExperimentManager(object):
 			self.db.cursor.execute('SELECT sim_cfg,snapshot_id,failing_project,random_seed FROM simulations WHERE id=%s;',(simulation_id,))
 		else:
 			self.db.cursor.execute('SELECT sim_cfg,snapshot_id,failing_project,random_seed FROM simulations WHERE id=?;',(simulation_id,))
-		
+
 		if network is None:
 			network = self.db.get_network(snapshot_id=snapshot_id)
 		sim_cfg,snapshot_id,failing,random_seed = self.db.cursor.fetchone()
@@ -121,14 +124,36 @@ class ExperimentManager(object):
 		sim.run()
 		self.db.register_simulation(sim)
 
+	def get_id_vector(self,snapshot_id):
+		'''
+		returns a vector of the ordered IDs
+		[project_id_1 project_id_2 ,... ]
+		'''
 
-	def get_results(self,snapshot_id=None,snapshot_time=None,full_network=False,nb_sim=100,**sim_cfg):
+		return np.asarray(sorted(self.db.get_nodes(snapshot_id=snapshot_id)))
+
+	def get_results(self,snapshot_id=None,snapshot_time=None,full_network=False,nb_sim=100,failing_project=None,**sim_cfg):
 		'''
 		Batch getting the results of the simulations.
-		Returns a vector of IDs + a sparse binary matrix
+		Returns a vector of IDs +a vector of source IDs + a sparse binary matrix
 		Alternatively output could be a pandas dataframe?
 		'''
-		self.run_simulations(snapshot_id=snapshot_id,snapshot_time=snapshot_time,nb_sim=nb_sim,full_network=full_network,**sim_cfg)
-		#list sim_ids
-		# efficient query
-		#
+		snapid = self.db.get_snapshot_id(snapshot_id=snapshot_id,snapshot_time=snapshot_time,full_network=full_network,create=True)
+		vec = self.get_id_vector(snapshot_id=snapid)
+		self.run_simulations(snapshot_id=snapid,nb_sim=nb_sim,failing_project=failing_project,**sim_cfg)
+		if failing_project is not None:
+			sim_list = self.list_simulations(failing_project=failing_project,snapshot_id=snapid,max_size=nb_sim,**sim_cfg)
+			if self.db.db_type =='postgres':
+				self.db.cursor.execute('''
+					SELECT %s,failing FROM simulation_results
+						WHERE id IN %s
+					;''',(failing_project,tuple([s_id for s_id,exec_status in sim_list])))
+			else:
+				self.db.cursor.execute('''
+					SELECT ?,failing FROM simulation_results
+						WHERE id IN ?
+					;''',(failing_project,tuple([s_id for s_id,exec_status in sim_list])))
+
+			results = sparse.lil_matrix((nb_nodes,nb_sim))
+			for fp, failing in self.db.cursor.fetchall():
+					pass

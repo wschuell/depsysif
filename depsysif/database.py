@@ -651,7 +651,6 @@ class Database(object):
 			if query_result is None:
 				raise ValueError('Snapshot id not found in database: {}'.format(snapshot_id))
 			else:
-				print(query_result)
 				snaptime = query_result[0]
 		else:
 			raise ValueError('You should provide either snapshot_id or snapshot_time')
