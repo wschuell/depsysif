@@ -19,7 +19,11 @@ class Simulation(object):
 	'''
 	Simulation objects simulate cascades of failures in projects through the dependency hierarchy
 	'''
-	def __init__(self,failing_project,network=None,propag_proba=0.9,norm_exponent=0.,implementation='classic',random_seed=None,verbose=False,snapshot_id=None,set_network=True):
+	default_propag_proba = 0.9
+	default_norm_exponent=0.
+	default_implementation = 'classic'
+
+	def __init__(self,failing_project,network=None,propag_proba=default_propag_proba,norm_exponent=default_norm_exponent,implementation=default_implementation,random_seed=None,verbose=False,snapshot_id=None,set_network=True):
 
 
 		if random_seed is None:
@@ -43,6 +47,22 @@ class Simulation(object):
 
 		if set_network:
 			self.set_network(network=network) # can potentially be None
+
+
+	@classmethod
+	def complete_sim_cfg(cls,in_place=True,**sim_cfg):
+		'''
+		Completes a partial sim_cfg dict with the default values
+		'''
+		sim_cfg = copy.deepcopy(sim_cfg)
+		if 'implementation' not in sim_cfg.keys():
+			sim_cfg['implementation'] = cls.default_implementation
+		if 'norm_exponent' not in sim_cfg.keys():
+			sim_cfg['norm_exponent'] = cls.default_norm_exponent
+		if 'propag_proba' not in sim_cfg.keys():
+			sim_cfg['propag_proba'] = cls.default_propag_proba
+		return sim_cfg
+
 
 	def set_network(self,network):
 		'''

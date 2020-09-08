@@ -855,11 +855,11 @@ class Database(object):
 				self.cursor.execute(''' INSERT INTO simulations(snapshot_id,sim_cfg,random_seed,failing_project)
 					VALUES(%s,%s,%s,%s)
 					ON CONFLICT DO NOTHING;
-					;''',(snapshot_id,json.dumps(simulation.sim_cfg, indent=None, sort_keys=False),simulation.random_seed,simulation.failing_project))
+					;''',(snapshot_id,json.dumps(simulation.sim_cfg, indent=None, sort_keys=True),simulation.random_seed,simulation.failing_project))
 			else:
 				self.cursor.execute('''INSERT OR IGNORE INTO simulations(snapshot_id,sim_cfg,random_seed,failing_project)
 					VALUES(?,?,?,?)
-					;''',(snapshot_id,json.dumps(simulation.sim_cfg, indent=None, sort_keys=False),simulation.random_seed,simulation.failing_project))
+					;''',(snapshot_id,json.dumps(simulation.sim_cfg, indent=None, sort_keys=True),simulation.random_seed,simulation.failing_project))
 
 			if simulation.results is not None:
 				self.submit_simulation_results(simulation=simulation,snapshot_id=snapshot_id)
@@ -883,7 +883,7 @@ class Database(object):
 								AND sim_cfg=%s
 								AND random_seed=%s
 								AND failing_project=%s
-					;''',(snapshot_id,json.dumps(simulation.sim_cfg, indent=None, sort_keys=False),simulation.random_seed,simulation.failing_project))
+					;''',(snapshot_id,json.dumps(simulation.sim_cfg, indent=None, sort_keys=True),simulation.random_seed,simulation.failing_project))
 
 				sim_id_list = self.cursor.fetchone()
 				if sim_id_list is None:
@@ -901,7 +901,7 @@ class Database(object):
 								AND sim_cfg=?
 								AND random_seed=?
 								AND failing_project=?
-					;''',(snapshot_id,json.dumps(simulation.sim_cfg, indent=None, sort_keys=False),simulation.random_seed,simulation.failing_project))
+					;''',(snapshot_id,json.dumps(simulation.sim_cfg, indent=None, sort_keys=True),simulation.random_seed,simulation.failing_project))
 
 				sim_id_list = self.cursor.fetchone()
 				if sim_id_list is None:

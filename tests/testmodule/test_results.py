@@ -77,11 +77,25 @@ def norm_exponent(request):
 #### Tests
 
 
-def test_exp_manager(testdb,timestamp):
+def test_results(testdb,timestamp):
 	xp_man = depsysif.experiment_manager.ExperimentManager(db=testdb)
 	xp_man.run_simulations(snapshot_time=timestamp,nb_sim=10)
-	snapid = testdb.get_snapshot_id(snapshot_id=timestamp)
-	xp_man.get_results(snapshot_id=snapid,result_type='count',failing_project=1,nb_sim=10)
+	snapid = testdb.get_snapshot_id(snapshot_time=timestamp)
+	xp_man.get_results(snapshot_id=snapid,result_type='raw',failing_project=1,nb_sim=10)
+	xp_man.get_results(snapshot_id=snapid,result_type='counts',failing_project=1,nb_sim=10)
 	xp_man.get_results(snapshot_id=snapid,result_type='nb_failing',failing_project=1,nb_sim=10)
-	xp_man.get_results_full(snapshot_id=snapid,result_type='count',nb_sim=10)
+
+def test_results_full(testdb,timestamp):
+	xp_man = depsysif.experiment_manager.ExperimentManager(db=testdb)
+	xp_man.run_simulations(snapshot_time=timestamp,nb_sim=10)
+	snapid = testdb.get_snapshot_id(snapshot_time=timestamp)
+	xp_man.get_results_full(snapshot_id=snapid,result_type='raw',nb_sim=10)
+	xp_man.get_results_full(snapshot_id=snapid,result_type='counts',nb_sim=10)
 	xp_man.get_results_full(snapshot_id=snapid,result_type='nb_failing',nb_sim=10)
+
+def test_results_full_aggregated(testdb,timestamp):
+	xp_man = depsysif.experiment_manager.ExperimentManager(db=testdb)
+	xp_man.run_simulations(snapshot_time=timestamp,nb_sim=10)
+	snapid = testdb.get_snapshot_id(snapshot_time=timestamp)
+	xp_man.get_results_full(snapshot_id=snapid,result_type='counts',nb_sim=10,aggregated=True)
+	xp_man.get_results_full(snapshot_id=snapid,result_type='nb_failing',nb_sim=10,aggregated=True)
