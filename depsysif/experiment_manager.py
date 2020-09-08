@@ -148,7 +148,7 @@ class ExperimentManager(object):
 			sim_id_list = sorted([s_id for s_id,exec_status in sim_list])
 			reverse_sim_index = {s:i for i,s in enumerate(sim_id_list)}
 			#### RAW
-			if result_type == 'raw'
+			if result_type == 'raw':
 				if self.db.db_type =='postgres':
 					self.db.cursor.execute('''
 						SELECT simulation_id,failing FROM simulation_results
@@ -226,7 +226,7 @@ class ExperimentManager(object):
 			sim_id_list = sorted([s_id for s_id,exec_status in sim_list])
 			reverse_sim_index = {s:i for i,s in enumerate(sim_id_list)}
 			#### RAW
-			if result_type == 'raw'
+			if result_type == 'raw':
 				if self.db.db_type =='postgres':
 					self.db.cursor.execute('''
 						SELECT sr.simulation_id,sr.failing,s.failing_project FROM simulation_results sr
