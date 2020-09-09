@@ -23,7 +23,7 @@ class Simulation(object):
 	default_norm_exponent=0.
 	default_implementation = 'classic'
 
-	def __init__(self,failing_project,network=None,propag_proba=default_propag_proba,norm_exponent=default_norm_exponent,implementation=default_implementation,random_seed=None,verbose=False,snapshot_id=None,set_network=True):
+	def __init__(self,failing_project,network=None,propag_proba=default_propag_proba,norm_exponent=default_norm_exponent,implementation=default_implementation,random_seed=None,verbose=False,snapshot_id=None,set_network=True,bootstrap_sim=None):
 
 
 		if random_seed is None:
@@ -46,7 +46,7 @@ class Simulation(object):
 		self.failing_project = failing_project
 
 		if set_network:
-			self.set_network(network=network) # can potentially be None
+			self.set_network(network=network,bootstrap_sim=bootstrap_sim) # can potentially be None
 
 
 	@classmethod
@@ -64,22 +64,36 @@ class Simulation(object):
 		return sim_cfg
 
 
-	def set_network(self,network):
+	def set_network(self,network,bootstrap_sim):
 		'''
 		Setting network and other related attributes
 		'''
-		if network is not None:
+		if bootstrap_sim is not None:
+			self.network = bootstrap_sim.network
+			self.sparse_mat = bootstrap_sim.sparse_mat
+			self.index_nodes = bootstrap_sim.index_nodes
+			self.index_reverse = bootstrap_sim.index_reverse
+			self.propag_mat = bootstrap_sim.propag_mat
+			self.network_diameter = bootstrap_sim.network_diameter
+			
+		elif network is not None:
 			self.network = network
 			self.sparse_mat = nx.to_scipy_sparse_matrix(network).astype(np.bool)
 			self.index_nodes = np.sort(self.network.nodes())
 			self.index_reverse = {n:i for i,n in enumerate(sorted(self.network.nodes()))} # sorted ensures that the process is deterministic (given the random seed)
 
 			with np.errstate(divide='ignore',invalid='ignore'):
-				norm_propag = 1./np.power(nx.to_scipy_sparse_matrix(network).sum(axis=0),self.norm_exponent)
-			self.propag_mat = nx.to_scipy_sparse_matrix(network).multiply(self.propag_proba/norm_propag).tocsr()
+				norm_propag = 1./np.power(self.sparse_mat.sum(axis=0),self.norm_exponent)
+			# self.propag_mat = nx.to_scipy_sparse_matrix(network).multiply(self.propag_proba/norm_propag).tocsr()
+			self.propag_mat = self.sparse_mat.multiply(self.propag_proba/norm_propag).tocsr()
 			# self.propag_mat = nx.to_scipy_sparse_matrix(network).transpose().multiply(self.propag_proba/norm_propag).tocsr()
 			# self.propag_mat = nx.to_scipy_sparse_matrix(network).multiply(self.propag_proba/norm_propag).tocsr() # CHECK MULTIPLICATIONS ARE ALONG RIGHT DIMENSIONS
-
+			# self.network_diameter = nx.diameter(self.network.to_undirected())
+			try:
+				self.network_diameter = nx.algorithms.dag.dag_longest_path_length(self.network)
+			except nx.exception.NetworkXUnfeasible:
+				logger.warning('Network has cycles, exact computation not available')
+				self.network_diameter = None
 
 	def set_from_edge_list(self,edge_list,node_list=None):
 		'''
@@ -185,7 +199,8 @@ class Simulation(object):
 
 
 			if full_results:
-				self.results = {'raw':failed_nodes,'ids':[int(self.index_nodes[p_nb]) for p_nb in np.where(failed_nodes)[0]],'failing_project':project_id}
+				# self.results = {'raw':failed_nodes,'ids':[int(self.index_nodes[p_nb]) for p_nb in np.where(failed_nodes)[0]],'failing_project':project_id}
+				self.results = {'raw':failed_nodes,'ids':self.index_nodes[np.where(failed_nodes)[0]],'failing_project':project_id}
 			else:
 				self.results = {'raw':failed_nodes}
 
@@ -204,13 +219,18 @@ class Simulation(object):
 		return ans
 
 
-	def compute_exact(self,project_id=None):
+	def compute_exact(self):
 		'''
 		Given a specific node, computes a resulting vector of probabilities of failure, based on a given process.
 		'''
-		if project_id is None:
-			project_id = self.failing_project
-		pass
+		if self.network_diameter is None:
+			raise ValueError('network diameter (or longest path length) is not well defined, network has cycles')
+		else:
+			mat = self.propag_mat.copy()
+			fp_id = self.index_reverse[self.failing_project]
+			mat[fp_id,fp_id] = 1
+			N = 2*self.network_diameter
+			return (mat**N)[:,fp_id]
 
 
 	def make_copies(self,nb=1):

@@ -83,33 +83,49 @@ class ExperimentManager(object):
 		return list(self.db.cursor.fetchall())
 
 
-	def run_simulations(self,failing_project=None,snapshot_id=None,snapshot_time=None,full_network=False,nb_sim=100,**sim_cfg):
+	def run_simulations(self,failing_project=None,snapshot_id=None,snapshot_time=None,full_network=False,nb_sim=100,network=None,bootstrap_sim=None,commit=True,limit_ids=None,**sim_cfg):
 		'''
 		checking existing simulations, creating new ones if necessary, executing the ones that are not executed yet
 		'''
-		network = None
 		snapid = self.db.get_snapshot_id(snapshot_id=snapshot_id,snapshot_time=snapshot_time,full_network=full_network,create=True)
 		if failing_project is None:
 			logger.info('Running simulations for all possible projects as source of failure')
-			for p_id in self.db.get_nodes(snapshot_id=snapid):
-				self.run_simulations(failing_project=p_id,snapshot_id=snapid,nb_sim=nb_sim,**sim_cfg)
+			if limit_ids:
+				id_list = self.db.get_nodes(snapshot_id=snapid)[:limit_ids]
+			else:
+				id_list = self.db.get_nodes(snapshot_id=snapid)
+			for p_id in id_list:
+
+				if network is None:
+					network = self.db.get_network(snapshot_id=snapid)
+				if bootstrap_sim is None:
+					bootstrap_sim = Simulation(network=network,failing_project=None,snapshot_id=snapid,**sim_cfg)
+					
+				self.run_simulations(failing_project=p_id,snapshot_id=snapid,nb_sim=nb_sim,bootstrap_sim=bootstrap_sim,network=network,commit=False,**sim_cfg)
+				if commit:
+					self.db.connection.commit()
 		else:
 			sim_list = self.list_simulations(failing_project=failing_project,snapshot_id=snapid,max_size=nb_sim,**sim_cfg)
 			for sim_id,exec_status in sim_list:
 				if not exec_status:
 					if network is None:
 						network = self.db.get_network(snapshot_id=snapid)
-					self.run_single_simulation(simulation_id=sim_id,network=network,snapshot_id=snapid)
+					if bootstrap_sim is None:
+						bootstrap_sim = Simulation(network=network,failing_project=None,snapshot_id=snapid,**sim_cfg)
+					self.run_single_simulation(simulation_id=sim_id,network=network,snapshot_id=snapid,bootstrap_sim=bootstrap_sim,commit=commit)
 			if len(sim_list) < nb_sim:
 				for _ in range(nb_sim-len(sim_list)):
 					if network is None:
 						network = self.db.get_network(snapshot_id=snapid)
-					sim = Simulation(network=network,snapshot_id=snapid,failing_project=failing_project,**sim_cfg)
+
+					if bootstrap_sim is None:
+						bootstrap_sim = Simulation(network=network,failing_project=None,snapshot_id=snapid,**sim_cfg)
+					sim = Simulation(network=network,snapshot_id=snapid,failing_project=failing_project,bootstrap_sim=bootstrap_sim,**sim_cfg)
 					sim.run()
-					self.db.register_simulation(sim)
+					self.db.register_simulation(sim,commit=commit)
 
 
-	def run_single_simulation(self,simulation_id,network=None):
+	def run_single_simulation(self,simulation_id,network=None,commit=True):
 		'''
 		Runs a single simulation, used in run_simulations
 		'''
@@ -124,7 +140,7 @@ class ExperimentManager(object):
 		sim_cfg,snapshot_id,failing,random_seed = self.db.cursor.fetchone()
 		sim = Simulation(network=network,snapshot_id=snapshot_id,failing_project=failing,random_seed=random_seed,**sim_cfg)
 		sim.run()
-		self.db.register_simulation(sim)
+		self.db.register_simulation(sim,commit=commit)
 
 	def get_id_vector(self,snapshot_id):
 		'''

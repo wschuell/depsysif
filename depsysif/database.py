@@ -6,6 +6,7 @@ import psycopg2
 from psycopg2 import extras
 import networkx as nx
 import csv
+import copy
 import json
 
 logger = logging.getLogger(__name__)
@@ -18,6 +19,12 @@ logger.setLevel(logging.INFO)
 
 
 from . import utils
+
+import numpy as np
+from psycopg2.extensions import register_adapter, AsIs
+
+register_adapter(np.float64, AsIs)
+register_adapter(np.int64, AsIs)
 
 class Database(object):
 	'''
@@ -120,6 +127,19 @@ class Database(object):
 				failing INTEGER REFERENCES projects(id) ON DELETE CASCADE,
 				PRIMARY KEY(simulation_id,failing)
 				);
+
+
+				CREATE TABLE IF NOT EXISTS deleted_dependencies(
+				project_using INTEGER REFERENCES projects(id) ON DELETE CASCADE,
+				project_used INTEGER REFERENCES projects(id) ON DELETE CASCADE,
+				deleted_at DATE DEFAULT CURRENT_TIMESTAMP,
+				deletions INTEGER,
+				PRIMARY KEY(project_using,project_used)
+				);
+
+				CREATE INDEX IF NOT EXISTS deleted_used ON deleted_dependencies(project_used,project_using);
+				CREATE INDEX IF NOT EXISTS deleted_time ON deleted_dependencies(deleted_at);
+
 				'''
 			for q in DB_INIT.split(';')[:-1]:
 				self.cursor.execute(q)
@@ -197,6 +217,17 @@ class Database(object):
 				PRIMARY KEY(simulation_id,failing)
 				);
 
+				CREATE TABLE IF NOT EXISTS deleted_dependencies(
+				project_using BIGINT REFERENCES projects(id) ON DELETE CASCADE,
+				project_used BIGINT REFERENCES projects(id) ON DELETE CASCADE,
+				deleted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+				deletions BIGINT,
+				PRIMARY KEY(project_using,project_used)
+				);
+
+				CREATE INDEX IF NOT EXISTS deleted_used ON deleted_dependencies(project_used,project_using);
+				CREATE INDEX IF NOT EXISTS deleted_time ON deleted_dependencies(deleted_at);
+
 				''')
 			self.connection.commit()
 
@@ -238,10 +269,20 @@ class Database(object):
 			else:
 				return False
 
-	def fill_from_crates(self,cratesdb_cursor=None,port=5432,user='postgres',database='crates_db',host='localhost',password=None,optional_deps=False):
+	def fill_from_crates(self,cratesdb_cursor=None,port=5432,user='postgres',database='crates_db',host='localhost',password=None,optional_deps=False,dependency_types=None):
 		'''
 		Fill projects, versions and deps from crates.io database
 		'''
+		if not optional_deps:
+			optional_deps_check = True
+		else:
+			optional_deps_check = False
+
+		if dependency_types is None:
+			dependency_types_check = False
+		else:
+			dependency_types_check = True
+
 		if cratesdb_cursor is None:
 			if password is not None:
 				logger.warning('You are providing your password directly, this could be a security concern, consider using solutions like .pgpass file.')
@@ -281,10 +322,14 @@ class Database(object):
 			logger.info('Table dependencies already filled')
 		else:
 			logger.info('Filling dependencies from {}'.format(database))
-			if optional_deps:
-				cratesdb_cursor.execute(''' SELECT version_id,crate_id FROM dependencies;''')
-			else:
-				cratesdb_cursor.execute(''' SELECT version_id,crate_id FROM dependencies WHERE NOT optional ;''')
+			cratesdb_cursor.execute('''SELECT version_id,crate_id FROM dependencies
+											WHERE (NOT %s OR NOT optional)
+											AND (NOT %s OR kind IN %s)
+											;''',(optional_deps_check,dependency_types_check,tuple(dependency_types)))
+			# if optional_deps:
+			# 	cratesdb_cursor.execute(''' SELECT version_id,crate_id FROM dependencies;''')
+			# else:
+			# 	cratesdb_cursor.execute(''' SELECT version_id,crate_id FROM dependencies WHERE NOT optional ;''')
 			if self.db_type == 'postgres':
 				extras.execute_batch(self.cursor,'INSERT INTO dependencies(version_id,project_id) VALUES(%s,%s) ON CONFLICT DO NOTHING;',cratesdb_cursor.fetchall())
 			else:
@@ -556,7 +601,7 @@ class Database(object):
 		#Final commit to the DB
 		self.connection.commit()
 
-	def get_project_id(self,project_name):
+	def get_project_id(self,project_name,raise_error=True):
 		'''
 		returns the id of a project given the name
 		'''
@@ -566,13 +611,16 @@ class Database(object):
 			self.cursor.execute('SELECT id FROM projects WHERE name=?;',(project_name,))
 		ans = list(self.cursor.fetchall())
 		if len(ans)==0:
-			raise ValueError('No project with name {}'.format(project_name))
+			if raise_error:
+				raise ValueError('No project with name {}'.format(project_name))
+			else:
+				return None
 		elif len(ans)>1:
 			raise ValueError('Several projects with name {}: {}'.format(project_name,len(ans)))
 		else:
 			return ans[0][0]
 
-	def get_project_name(self,project_id):
+	def get_project_name(self,project_id,raise_error=True):
 		'''
 		returns the name of a project given the id
 		'''
@@ -582,7 +630,10 @@ class Database(object):
 			self.cursor.execute('SELECT name FROM projects WHERE id=?;',(project_id,))
 		ans = self.cursor.fetchone()
 		if ans is None:
-			raise ValueError('No project with id {}'.format(project_id))
+			if raise_error:
+				raise ValueError('No project with id {}'.format(project_id))
+			else:
+				return None
 		else:
 			return ans[0]
 
@@ -659,9 +710,9 @@ class Database(object):
 
 		logger.info('Getting nodes at time {}'.format(snaptime.strftime('%Y-%m-%d %H:%M:%S')))
 		if self.db_type == 'postgres':
-			self.cursor.execute('SELECT id FROM projects WHERE created_at<=%s;',(snaptime,))
+			self.cursor.execute('SELECT id FROM projects WHERE created_at<=%s ORDER BY id;',(snaptime,))
 		else:
-			self.cursor.execute('SELECT id FROM projects WHERE created_at<=(SELECT DATETIME(?));',(snaptime,))
+			self.cursor.execute('SELECT id FROM projects WHERE created_at<=(SELECT DATETIME(?)) ORDER BY id;',(snaptime,))
 		return [r[0] for r in self.cursor.fetchall()]
 
 
@@ -693,7 +744,7 @@ class Database(object):
 		else:
 			return edge_list
 
-	def detect_cycles(self,snapshot_id,cycle_length=None):
+	def detect_cycles(self,snapshot_id,cycle_length=None,convert_to_names=True):
 		'''
 		detecting cycles in a particular snapshot
 		Length 1,2,3 and 4 supported so far
@@ -838,10 +889,13 @@ class Database(object):
 		if cycle_length is not None:
 			ans = list(self.cursor.fetchall())
 			logger.info('Found {} cycles of length {}'.format(len(ans),cycle_length))
-		return ans
+		if convert_to_names:
+			return [ tuple([self.get_project_name(rr) for rr in r]) for r in ans]
+		else:
+			return ans
 
 
-	def register_simulation(self,simulation,snapshot_id=None):
+	def register_simulation(self,simulation,snapshot_id=None,commit=True):
 		'''
 		Registers a simulation object into the database
 		If results are available, puts results as well
@@ -862,11 +916,12 @@ class Database(object):
 					;''',(snapshot_id,json.dumps(simulation.sim_cfg, indent=None, sort_keys=True),simulation.random_seed,simulation.failing_project))
 
 			if simulation.results is not None:
-				self.submit_simulation_results(simulation=simulation,snapshot_id=snapshot_id)
-			self.connection.commit()
+				self.submit_simulation_results(simulation=simulation,snapshot_id=snapshot_id,commit=False)
+			if commit:
+				self.connection.commit()
 
 
-	def submit_simulation_results(self,simulation,snapshot_id=None):
+	def submit_simulation_results(self,simulation,snapshot_id=None,sim_id=None,commit=True):
 		'''
 		Puts the results of given simulation in the database
 		'''
@@ -878,41 +933,116 @@ class Database(object):
 			logger.info('Simulation has no results to be submitted')
 		else:
 			if self.db_type == 'postgres':
-				self.cursor.execute('''SELECT id FROM simulations
+				if sim_id is None:
+					self.cursor.execute('''SELECT id FROM simulations
 								WHERE snapshot_id=%s
 								AND sim_cfg=%s
 								AND random_seed=%s
 								AND failing_project=%s
 					;''',(snapshot_id,json.dumps(simulation.sim_cfg, indent=None, sort_keys=True),simulation.random_seed,simulation.failing_project))
 
-				sim_id_list = self.cursor.fetchone()
-				if sim_id_list is None:
-					self.register_simulation(simulation=simulation,snapshot_id=snapshot_id)
-				else:
-					sim_id = sim_id_list[0]
-					extras.execute_batch(self.cursor,'''
+					sim_id_list = self.cursor.fetchone()
+					if sim_id_list is None:
+						self.register_simulation(simulation=simulation,snapshot_id=snapshot_id)
+					else:
+						sim_id = sim_id_list[0]
+				extras.execute_batch(self.cursor,'''
 						INSERT INTO simulation_results(simulation_id,failing)
 						VALUES(%s,%s)
 						;''',((sim_id,fp) for fp in simulation.results['ids']))
-					self.cursor.execute('''UPDATE simulations SET executed=TRUE WHERE id=%s;''',(sim_id,))
+				self.cursor.execute('''UPDATE simulations SET executed=TRUE WHERE id=%s;''',(sim_id,))
 			else:
-				self.cursor.execute('''SELECT id FROM simulations
+				if sim_id is None:
+					self.cursor.execute('''SELECT id FROM simulations
 								WHERE snapshot_id=?
 								AND sim_cfg=?
 								AND random_seed=?
 								AND failing_project=?
 					;''',(snapshot_id,json.dumps(simulation.sim_cfg, indent=None, sort_keys=True),simulation.random_seed,simulation.failing_project))
 
-				sim_id_list = self.cursor.fetchone()
-				if sim_id_list is None:
-					self.register_simulation(simulation=simulation,snapshot_id=snapshot_id)
-				else:
-					sim_id = sim_id_list[0]
-					self.cursor.executemany('''
+					sim_id_list = self.cursor.fetchone()
+					if sim_id_list is None:
+						self.register_simulation(simulation=simulation,snapshot_id=snapshot_id,commit=False)
+					else:
+						sim_id = sim_id_list[0]
+				self.cursor.executemany('''
 						INSERT INTO simulation_results(simulation_id,failing)
 						VALUES(?,?)
 						;''',((sim_id,fp) for fp in simulation.results['ids']))
 
-					self.cursor.execute('''UPDATE simulations SET executed=1 WHERE id=?;''',(sim_id,))
-			self.connection.commit()
+				self.cursor.execute('''UPDATE simulations SET executed=1 WHERE id=?;''',(sim_id,))
+			if commit:
+				self.connection.commit()
+
+	def delete_dependency(self,source,target):
+		'''
+		deletes all dependencies between any version of source to target
+		stores the couple in deleted_dependencies_table only if there was in fact a dependency to delete
+		'''
+		if self.db_type == 'postgres':
+			self.cursor.execute('''
+				DELETE FROM dependencies d
+					USING versions v
+						WHERE v.id=d.version_id
+							AND v.project_id=%s
+							AND d.project_id=%s
+				;''',(source,target))
+			deleted = self.cursor.rowcount
+		else:
+			self.cursor.execute('''
+				DELETE FROM dependencies d
+					WHERE EXISTS (SELECT * FROM versions v
+							WHERE v.id=d.version_id
+							AND v.project_id=?)
+						AND d.project_id=?
+				;''',(source,target))
+
+			self.cursor.execute('SELECT changes();')
+			deleted = self.cursor.fetchone()[0]
+
+
+		if deleted > 0:
+			if self.db_type == 'postgres':
+				self.cursor.execute('''
+					INSERT INTO deleted_dependencies(project_using,project_used,deletions) VALUES(%s,%s,%s)
+					;''',(source,target,deleted))
+			else:
+				self.cursor.execute('''
+					INSERT INTO deleted_dependencies(project_using,project_used,deletions) VALUES(?,?,?)
+					;''',(source,target,deleted))
+			self.commit()
+			logger.info('Deleted dependency links from {} to {}'.format(source,target))
+
+	def delete_auto_dependencies(self):
+		'''
+		Removing length one cycles
+		'''
+		self.cursor.execute('''
+			SELECT d.project_id FROM dependencies d
+				INNER JOIN versions v
+					ON v.id = d.version_id
+					AND d.project_id = v.project_id
+			;''')
+		for autoref in self.cursor.fetchall():
+			self.delete_dependency(source=autoref,target=autoref)
+
+	def delete_from_list(self,dep_list=[],filename=None):
+		'''
+		Delete dependencies from given list and filename (both can be used at the same time)
+		'''
+		dep_list = copy.deepcopy(dep_list)
+		if filename is not None:
+			with open(filename,'r') as f:
+				dep_list += [l.split(',') for l in f.read().split('\n')]
+		for s,t in dep_list:
+			try:
+				s_id = int(s)
+			except:
+				s_id = self.get_project_id(project_name=s,raise_error=False)
+			try:
+				t_id = int(t)
+			except:
+				t_id = self.get_project_id(project_name=t,raise_error=False)
+			if s_id is not None and t_id is not None:
+				self.delete_dependency(source=s_id,target=t_id)
 

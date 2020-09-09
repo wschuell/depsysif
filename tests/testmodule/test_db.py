@@ -64,6 +64,19 @@ def test_filldb(dbtype):
 	csv_folder = os.path.join(current_folder,'test_csvs','basic')
 	db.fill_from_csv(folder=csv_folder,headers_present=True)
 
+def test_delete(dbtype):
+	db = depsysif.database.Database(db_name='travis_ci_test_depsysif',db_type=dbtype)
+	db.clean_db()
+	db.init_db()
+	current_folder = os.path.dirname(os.path.abspath(__file__))
+	csv_folder = os.path.join(current_folder,'test_csvs','basic')
+	db.fill_from_csv(folder=csv_folder,headers_present=True)
+	db.delete_dependency(2,1)
+	db.delete_dependency(2,1)
+	db.delete_dependency(1,2)
+	db.cursor.execute('SELECT deletions FROM deleted_dependencies;')
+	assert db.cursor.fetchone()[0] == 3
+
 def test_snapshot(testdb,timestamp,fullnetwork):
 	testdb.build_snapshot(snapshot_time=timestamp,full_network=fullnetwork)
 

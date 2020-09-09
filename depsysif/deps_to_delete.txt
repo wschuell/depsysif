@@ -1,0 +1,3 @@
+juju,charmhelpers
+arraygen,arraygen-docfix
+expr-parent,expr-child
