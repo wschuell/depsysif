@@ -242,6 +242,7 @@ class Database(object):
 		self.cursor.execute('DROP TABLE IF EXISTS snapshot_data;')
 		self.cursor.execute('DROP TABLE IF EXISTS snapshots;')
 		self.cursor.execute('DROP TABLE IF EXISTS dependencies;')
+		self.cursor.execute('DROP TABLE IF EXISTS deleted_dependencies;')
 		self.cursor.execute('DROP TABLE IF EXISTS versions;')
 		self.cursor.execute('DROP TABLE IF EXISTS projects;')
 		self.connection.commit()
