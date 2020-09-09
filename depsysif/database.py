@@ -991,7 +991,7 @@ class Database(object):
 			deleted = self.cursor.rowcount
 		else:
 			self.cursor.execute('''
-				DELETE FROM dependencies d
+				DELETE FROM dependencies AS d
 					WHERE EXISTS (SELECT * FROM versions v
 							WHERE v.id=d.version_id
 							AND v.project_id=?)
@@ -1011,7 +1011,7 @@ class Database(object):
 				self.cursor.execute('''
 					INSERT INTO deleted_dependencies(project_using,project_used,deletions) VALUES(?,?,?)
 					;''',(source,target,deleted))
-			self.commit()
+			self.connection.commit()
 			logger.info('Deleted dependency links from {} to {}'.format(source,target))
 
 	def delete_auto_dependencies(self):
@@ -1019,7 +1019,7 @@ class Database(object):
 		Removing length one cycles
 		'''
 		self.cursor.execute('''
-			SELECT d.project_id FROM dependencies d
+			SELECT d.project_id FROM dependencies AS d
 				INNER JOIN versions v
 					ON v.id = d.version_id
 					AND d.project_id = v.project_id
