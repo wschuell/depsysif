@@ -993,11 +993,11 @@ class Database(object):
 			deleted = self.cursor.rowcount
 		else:
 			self.cursor.execute('''
-				DELETE FROM dependencies AS d
+				DELETE FROM dependencies
 					WHERE EXISTS (SELECT * FROM versions v
-							WHERE v.id=d.version_id
+							WHERE v.id=dependencies.version_id
 							AND v.project_id=?)
-						AND d.project_id=?
+						AND dependencies.project_id=?
 				;''',(source,target))
 
 			self.cursor.execute('SELECT changes();')
