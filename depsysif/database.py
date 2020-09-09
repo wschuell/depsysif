@@ -25,6 +25,7 @@ from psycopg2.extensions import register_adapter, AsIs
 
 register_adapter(np.float64, AsIs)
 register_adapter(np.int64, AsIs)
+sqlite3.register_adapter(np.int64, int)
 
 class Database(object):
 	'''
@@ -945,6 +946,7 @@ class Database(object):
 					sim_id_list = self.cursor.fetchone()
 					if sim_id_list is None:
 						self.register_simulation(simulation=simulation,snapshot_id=snapshot_id)
+						return
 					else:
 						sim_id = sim_id_list[0]
 				extras.execute_batch(self.cursor,'''

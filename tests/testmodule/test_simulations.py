@@ -133,11 +133,11 @@ def test_simresult(testnetdb,implementation):
 	net = testnetdb.get_network(snapshot_time=None) # when None, taking max time in db
 	sim = depsysif.simulations.Simulation(network=net,failing_project=3,propag_proba=1,implementation=implementation)
 	sim.run()
-	assert sim.results['ids'] == [3,4,5,6]
+	assert (sim.results['ids'] == [3,4,5,6]).all()
 
 	sim = depsysif.simulations.Simulation(network=net,failing_project=7,propag_proba=1,implementation=implementation)
 	sim.run()
-	assert sim.results['ids'] == [4,7]
+	assert (sim.results['ids'] == [4,7]).all()
 
 
 def test_sim_mat(testnetdb,propag_proba,norm_exponent):

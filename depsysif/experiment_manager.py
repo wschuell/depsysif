@@ -100,7 +100,7 @@ class ExperimentManager(object):
 					network = self.db.get_network(snapshot_id=snapid)
 				if bootstrap_sim is None:
 					bootstrap_sim = Simulation(network=network,failing_project=None,snapshot_id=snapid,**sim_cfg)
-					
+
 				self.run_simulations(failing_project=p_id,snapshot_id=snapid,nb_sim=nb_sim,bootstrap_sim=bootstrap_sim,network=network,commit=False,**sim_cfg)
 				if commit:
 					self.db.connection.commit()
@@ -185,7 +185,7 @@ class ExperimentManager(object):
 							ORDER BY simulation_id,failing
 						;'''.format(','.join(['?' for _ in sim_id_list])),sim_id_list)
 
-				results_data = list((index_reverse[fp],reverse_sim_index[s_id],True) for s_id,fp in self.db.cursor.fetchall())
+				results_data = [(index_reverse[fp],reverse_sim_index[s_id],True) for s_id,fp in self.db.cursor.fetchall()]
 				results_v = np.asarray([r[2] for r in results_data])
 				results_i = np.asarray([r[0] for r in results_data])
 				results_j = np.asarray([r[1] for r in results_data])
@@ -244,11 +244,11 @@ class ExperimentManager(object):
 		index_reverse = {n:i for i,n in enumerate(id_vec)}
 
 		self.run_simulations(snapshot_id=snapid,nb_sim=nb_sim,**sim_cfg)
-		
+
 		sim_list = []
 		for n in id_vec:
 			sim_list += self.list_simulations(failing_project=int(n),snapshot_id=snapid,max_size=nb_sim,**sim_cfg)
-		
+
 		sim_id_list = sorted([s_id for s_id,exec_status in sim_list])
 		reverse_sim_index = {s:i for i,s in enumerate(sim_id_list)}
 		#### RAW   returns sparse_mat[project,sim] aggregated by orig_failing_project
@@ -272,7 +272,7 @@ class ExperimentManager(object):
 						;'''.format(','.join(['?' for _ in sim_id_list])),sim_id_list)
 
 
-				results_data = list((index_reverse[fp],reverse_sim_index[s_id],True) for s_id,fp,orig_fp in self.db.cursor.fetchall())
+				results_data = [(index_reverse[fp],reverse_sim_index[s_id],True) for s_id,fp,orig_fp in self.db.cursor.fetchall()]
 				results_v = np.asarray([r[2] for r in results_data])
 				results_i = np.asarray([r[0] for r in results_data])
 				results_j = np.asarray([r[1] for r in results_data])
@@ -302,18 +302,23 @@ class ExperimentManager(object):
 			if aggregated:
 				results = np.zeros((len(id_vec),))
 				for fp,orig_fp,val in self.db.cursor.fetchall():
-					results[index_reverse[fp]] += val
+					try:
+						results[index_reverse[fp]] += val
+					except:
+						logger.warning(fp)
+						logger.warning(index_reverse)
+						raise
 			else:
 				# as sparse
 
-				results_data = list((index_reverse[fp],index_reverse[orig_fp],val) for fp,orig_fp,val in self.db.cursor.fetchall())
+				results_data = [(index_reverse[fp],index_reverse[orig_fp],val) for fp,orig_fp,val in self.db.cursor.fetchall()]
 				results_v = np.asarray([r[2] for r in results_data])
 				results_i = np.asarray([r[0] for r in results_data])
 				results_j = np.asarray([r[1] for r in results_data])
 				results_ijv = (results_v,(results_i,results_j))
 
 				results = scipy.sparse.coo_matrix(results_ijv,shape=(len(id_vec),len(id_vec),),dtype=np.int64).tocsr()
-			
+
 			return results
 		#### NB FAILING   returns sparse_mat[sim,orig_failing_project] or nparray[sim] aggregated by orig_failing_project
 		elif result_type == 'nb_failing':
@@ -340,7 +345,7 @@ class ExperimentManager(object):
 					results[reverse_sim_index[s_id]] += val
 			else:
 				# as sparse; having to shift sim_id by nb_sim*(orig_fp) to stack simulations by orig_fp
-				results_data = list((reverse_sim_index[s_id]-nb_sim*index_reverse[orig_fp],index_reverse[orig_fp],val) for s_id,orig_fp,val in self.db.cursor.fetchall())
+				results_data = [(reverse_sim_index[s_id]-nb_sim*index_reverse[orig_fp],index_reverse[orig_fp],val) for s_id,orig_fp,val in self.db.cursor.fetchall()]
 				results_v = np.asarray([r[2] for r in results_data])
 				results_i = np.asarray([r[0] for r in results_data])
 				results_j = np.asarray([r[1] for r in results_data])
