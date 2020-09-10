@@ -90,6 +90,7 @@ class Database(object):
 				name TEXT,
 				full_network BOOLEAN NOT NULL,
 				snapshot_time DATE NOT NULL,
+				created_at DATE DEFAULT CURRENT_TIMESTAMP,
 				UNIQUE(snapshot_time,full_network)
 				);
 
@@ -115,13 +116,14 @@ class Database(object):
 				UNIQUE(snapshot_id,sim_cfg,random_seed,failing_project)
 				);
 
-				CREATE INDEX IF NOT EXISTS sim_algocfg ON simulations(sim_cfg);
-				CREATE INDEX IF NOT EXISTS sim_time ON simulations(created_at);
-				CREATE INDEX IF NOT EXISTS sim_snapid ON simulations(snapshot_id);
-				CREATE INDEX IF NOT EXISTS sim_seed ON simulations(snapshot_id,random_seed);
-				CREATE INDEX IF NOT EXISTS sim_exec ON simulations(snapshot_id,executed);
-				CREATE INDEX IF NOT EXISTS sim_proj ON simulations(failing_project);
-				CREATE INDEX IF NOT EXISTS sim_snapid_proj ON simulations(snapshot_id,failing_project);
+				-- CREATE INDEX IF NOT EXISTS sim_algocfg ON simulations(sim_cfg);
+				-- CREATE INDEX IF NOT EXISTS sim_time ON simulations(created_at);
+				-- CREATE INDEX IF NOT EXISTS sim_snapid ON simulations(snapshot_id);
+				-- CREATE INDEX IF NOT EXISTS sim_seed ON simulations(snapshot_id,random_seed);
+				-- CREATE INDEX IF NOT EXISTS sim_exec ON simulations(snapshot_id,executed);
+				-- CREATE INDEX IF NOT EXISTS sim_proj ON simulations(failing_project);
+				-- CREATE INDEX IF NOT EXISTS sim_snapid_proj ON simulations(snapshot_id,failing_project);
+				CREATE INDEX IF NOT EXISTS sim_extended_idx ON simulations(snapshot_id,sim_cfg,failing_project,executed,id);
 
 				CREATE TABLE IF NOT EXISTS simulation_results(
 				simulation_id INTEGER REFERENCES simulations(id) ON DELETE CASCADE,
@@ -140,6 +142,30 @@ class Database(object):
 
 				CREATE INDEX IF NOT EXISTS deleted_used ON deleted_dependencies(project_used,project_using);
 				CREATE INDEX IF NOT EXISTS deleted_time ON deleted_dependencies(deleted_at);
+
+				CREATE TABLE IF NOT EXISTS measure_types(
+				id INTEGER PRIMARY KEY,
+				name TEXT,
+				cfg TEXT,
+				UNIQUE(name,cfg)
+				);
+
+				CREATE TABLE IF NOT EXISTS computed_measures(
+				measure_id INTEGER REFERENCES measure_types(id) ON DELETE CASCADE,
+				snapshot_id INTEGER REFERENCES snapshots(id) ON DELETE CASCADE,
+				created_at DATE DEFAULT CURRENT_TIMESTAMP,
+				PRIMARY KEY(measure_id,snapshot_id)
+				);
+
+				CREATE TABLE IF NOT EXISTS measures(
+				measure_id INTEGER REFERENCES measure_types(id) ON DELETE CASCADE,
+				snapshot_id INTEGER REFERENCES snapshots(id) ON DELETE CASCADE,
+				project_id INTEGER REFERENCES projects(id) ON DELETE CASCADE,
+				value REAL,
+				PRIMARY KEY (measure_id,snapshot_id,project_id)
+				);
+
+				CREATE INDEX IF NOT EXISTS measures_byproj ON measures(measure_id,project_id,snapshot_id);
 
 				'''
 			for q in DB_INIT.split(';')[:-1]:
@@ -178,6 +204,7 @@ class Database(object):
 				name TEXT,
 				full_network BOOLEAN NOT NULL,
 				snapshot_time TIMESTAMP NOT NULL,
+				created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 				UNIQUE(snapshot_time,full_network)
 				);
 
@@ -204,13 +231,14 @@ class Database(object):
 				UNIQUE(snapshot_id,sim_cfg,random_seed,failing_project)
 				);
 
-				CREATE INDEX IF NOT EXISTS sim_algocfg ON simulations USING GIN(sim_cfg);
-				CREATE INDEX IF NOT EXISTS sim_time ON simulations(created_at);
-				CREATE INDEX IF NOT EXISTS sim_snapid ON simulations(snapshot_id);
-				CREATE INDEX IF NOT EXISTS sim_seed ON simulations(snapshot_id,random_seed);
-				CREATE INDEX IF NOT EXISTS sim_exec ON simulations(snapshot_id,executed);
-				CREATE INDEX IF NOT EXISTS sim_proj ON simulations(failing_project);
-				CREATE INDEX IF NOT EXISTS sim_snapid_proj ON simulations(snapshot_id,failing_project);
+				-- CREATE INDEX IF NOT EXISTS sim_algocfg ON simulations USING GIN(sim_cfg);
+				-- CREATE INDEX IF NOT EXISTS sim_time ON simulations(created_at);
+				-- CREATE INDEX IF NOT EXISTS sim_snapid ON simulations(snapshot_id);
+				-- CREATE INDEX IF NOT EXISTS sim_seed ON simulations(snapshot_id,random_seed);
+				-- CREATE INDEX IF NOT EXISTS sim_exec ON simulations(snapshot_id,executed);
+				-- CREATE INDEX IF NOT EXISTS sim_proj ON simulations(failing_project);
+				-- CREATE INDEX IF NOT EXISTS sim_snapid_proj ON simulations(snapshot_id,failing_project);
+				CREATE INDEX IF NOT EXISTS sim_extended_idx ON simulations(snapshot_id,sim_cfg,failing_project,executed,id);
 
 				CREATE TABLE IF NOT EXISTS simulation_results(
 				simulation_id BIGINT REFERENCES simulations(id) ON DELETE CASCADE,
@@ -229,6 +257,29 @@ class Database(object):
 				CREATE INDEX IF NOT EXISTS deleted_used ON deleted_dependencies(project_used,project_using);
 				CREATE INDEX IF NOT EXISTS deleted_time ON deleted_dependencies(deleted_at);
 
+				CREATE TABLE IF NOT EXISTS measure_types(
+				id BIGSERIAL PRIMARY KEY,
+				name TEXT,
+				cfg JSONB,
+				UNIQUE(name,cfg)
+				);
+
+				CREATE TABLE IF NOT EXISTS computed_measures(
+				measure_id BIGINT REFERENCES measure_types(id) ON DELETE CASCADE,
+				snapshot_id BIGINT REFERENCES snapshots(id) ON DELETE CASCADE,
+				created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+				PRIMARY KEY(measure_id,snapshot_id)
+				);
+
+				CREATE TABLE IF NOT EXISTS measures(
+				measure_id BIGINT REFERENCES measure_types(id) ON DELETE CASCADE,
+				snapshot_id BIGINT REFERENCES snapshots(id) ON DELETE CASCADE,
+				project_id BIGINT REFERENCES projects(id) ON DELETE CASCADE,
+				value REAL,
+				PRIMARY KEY (measure_id,snapshot_id,project_id)
+				);
+
+				CREATE INDEX IF NOT EXISTS measures_byproj ON measures(measure_id,project_id,snapshot_id);
 				''')
 			self.connection.commit()
 
@@ -246,17 +297,39 @@ class Database(object):
 		self.cursor.execute('DROP TABLE IF EXISTS deleted_dependencies;')
 		self.cursor.execute('DROP TABLE IF EXISTS versions;')
 		self.cursor.execute('DROP TABLE IF EXISTS projects;')
+		self.cursor.execute('DROP TABLE IF EXISTS measure_types;')
+		self.cursor.execute('DROP TABLE IF EXISTS measures;')
+		self.cursor.execute('DROP TABLE IF EXISTS computated_measures;')
 		self.connection.commit()
 
 	def remove_results(self):
-		self.cursor.execute('DELETE FROM simulation_results;')
-		self.cursor.execute('DELETE FROM simulations;')
+		self.cursor.execute('DELETE FROM simulation_results CASCADE;')
+		self.cursor.execute('DELETE FROM simulations CASCADE;')
 		self.connection.commit()
 
 	def remove_snapshots(self):
-		self.cursor.execute('DELETE FROM snapshot_data;')
-		self.cursor.execute('DELETE FROM snapshots;')
+		self.cursor.execute('DELETE FROM snapshot_data CASCADE;')
+		self.cursor.execute('DELETE FROM snapshots CASCADE;')
 		self.connection.commit()
+
+	def remove_measures(self,measure=None):
+		'''
+		Removing measures and associated data from the database
+		'''
+		if measure is None:
+			self.cursor.execute('DELETE FROM measures CASCADE;')
+		else:
+			if self.db_type == 'postgres':
+				self.cursor.execute('DELETE FROM measures WHERE name=%s CASCADE;',(measure,))
+			else:
+				self.cursor.execute('DELETE FROM measures WHERE name=? CASCADE;',(measure,))
+		self.connection.commit()
+
+	def remove_measure(self,measure):
+		'''
+		Just a wrapper for the syntax
+		'''
+		self.remove_measures(measure=measure)
 
 	def is_empty(self,table):
 		'''
@@ -271,7 +344,7 @@ class Database(object):
 			else:
 				return False
 
-	def fill_from_crates(self,cratesdb_cursor=None,port=5432,user='postgres',database='crates_db',host='localhost',password=None,optional_deps=False,dependency_types=None):
+	def fill_from_crates(self,cratesdb_cursor=None,port=5432,user='postgres',database='crates_db',host='localhost',password=None,optional_deps=False,dependency_types=None,delete_autodeps=True):
 		'''
 		Fill projects, versions and deps from crates.io database
 		'''
@@ -341,7 +414,11 @@ class Database(object):
 			logger.info('Filled dependencies')
 
 
-	def fill_from_libio(self,libio_cursor=None,port=5432,user='postgres',database='librariesio_db',host='localhost',password=None,platform=None,dependency_types=None,optional_deps=False):
+		if delete_autodeps:
+			self.delete_auto_dependencies()
+
+
+	def fill_from_libio(self,libio_cursor=None,port=5432,user='postgres',database='librariesio_db',host='localhost',password=None,platform=None,dependency_types=None,optional_deps=False,delete_autodeps=True):
 		'''
 		Fill from libraries.io database
 		created_at is by default chosen for a reference date in the versions table, but published_at could be selected as an alternative
@@ -423,7 +500,12 @@ class Database(object):
 			logger.info('Filled dependencies')
 
 
-	def fill_from_csv(self,folder='.',projects_file='projects.csv',versions_file='versions.csv',dependencies_file='dependencies.csv',headers_present=False,delimiter=','):
+
+		if delete_autodeps:
+			self.delete_auto_dependencies()
+
+
+	def fill_from_csv(self,folder='.',projects_file='projects.csv',versions_file='versions.csv',dependencies_file='dependencies.csv',headers_present=False,delimiter=',',delete_autodeps=True):
 		'''
 		Fill from csv files, organized as:
 		 projects_file: id, name, created_at
@@ -491,6 +573,11 @@ class Database(object):
 
 				self.connection.commit()
 			logger.info('Filled dependencies')
+
+
+
+		if delete_autodeps:
+			self.delete_auto_dependencies()
 
 
 
@@ -901,6 +988,8 @@ class Database(object):
 		'''
 		Registers a simulation object into the database
 		If results are available, puts results as well
+
+		TODO: Should forbid to register if results are not available (=attr set to None) to avoid the necessity of the executed attr in the DB
 		'''
 		if snapshot_id is None:
 			snapshot_id = simulation.snapshot_id
@@ -1027,7 +1116,7 @@ class Database(object):
 					AND d.project_id = v.project_id
 			;''')
 		for autoref in self.cursor.fetchall():
-			self.delete_dependency(source=autoref,target=autoref)
+			self.delete_dependency(source=autoref[0],target=autoref[0])
 
 	def delete_from_list(self,dep_list=[],filename=None):
 		'''
@@ -1036,7 +1125,7 @@ class Database(object):
 		dep_list = copy.deepcopy(dep_list)
 		if filename is not None:
 			with open(filename,'r') as f:
-				dep_list += [l.split(',') for l in f.read().split('\n')]
+				dep_list += [l.split(',') for l in f.read().split('\n') if ',' in l and not l.startswith('#')]
 		for s,t in dep_list:
 			try:
 				s_id = int(s)
@@ -1048,4 +1137,41 @@ class Database(object):
 				t_id = self.get_project_id(project_name=t,raise_error=False)
 			if s_id is not None and t_id is not None:
 				self.delete_dependency(source=s_id,target=t_id)
+
+	def fill_measures(self,measure,snapshot_id,value_vec,projid_vec,**measure_cfg):
+		'''
+		Fills in results of a measure
+		TODO: autocomplete measure_cfg
+		'''
+		if self.db_type == 'postgres':
+			self.cursor.execute('INSERT INTO measure_types(name,cfg) VALUES(%s,%s) ON CONFLICT DO NOTHING;',(measure,json.dumps(measure_cfg, indent=None, sort_keys=True)))
+			self.cursor.execute('SELECT id FROM measure_types WHERE name=%s AND cfg=%s;',(measure,json.dumps(measure_cfg, indent=None, sort_keys=True)))
+		else:
+			self.cursor.execute('INSERT OR IGNORE INTO measure_types(name,cfg) VALUES(?,?);',(measure,json.dumps(measure_cfg, indent=None, sort_keys=True)))
+			self.cursor.execute('SELECT id FROM measure_types WHERE name=? AND cfg=?;',(measure,json.dumps(measure_cfg, indent=None, sort_keys=True)))
+
+		measure_id = self.cursor.fetchone()[0]
+
+		if self.db_type == 'postgres':
+			self.cursor.execute('SELECT * FROM  computed_measures WHERE measure_id=%s AND snapshot_id=%s;',(measure_id,snapshot_id))
+		else:
+			self.cursor.execute('SELECT * FROM  computed_measures WHERE measure_id=? AND snapshot_id=?;',(measure_id,snapshot_id))
+
+		if self.cursor.fetchone() is not None:
+			logger.info('Measure {} for snapshot {} already filled in'.format(measure,snapshot_id))
+		else:
+			logger.info('Filling in measure {} for snapshot {}'.format(measure,snapshot_id))
+
+			if self.db_type == 'postgres':
+				self.cursor.execute('INSERT INTO computed_measures(measure_id,snapshot_id) VALUES(%s,%s);',(measure_id,snapshot_id))
+			else:
+				self.cursor.execute('INSERT INTO computed_measures(measure_id,snapshot_id) VALUES(?,?);',(measure_id,snapshot_id))
+
+			if self.db_type == 'postgres':
+				extras.execute_batch(self.cursor,'INSERT INTO measures(measure_id,snapshot_id,project_id,value) VALUES(%s,%s,%s,%s);',((measure_id,snapshot_id,p_id,val) for p_id,val in zip(projid_vec,value_vec)))
+			else:
+				self.cursor.executemany('INSERT INTO measures(measure_id,snapshot_id,project_id,value) VALUES(?,?,?,?);',((measure_id,snapshot_id,p_id,val) for p_id,val in zip(projid_vec,value_vec)))
+
+			self.connection.commit()
+			logger.info('Filled in measure {} for snapshot {}'.format(measure,snapshot_id))
 

@@ -6,6 +6,9 @@ import numpy as np
 import scipy
 import scipy.sparse
 
+import warnings
+from scipy.sparse import SparseEfficiencyWarning
+
 logger = logging.getLogger(__name__)
 ch = logging.StreamHandler()
 ch.setLevel(logging.DEBUG)
@@ -50,18 +53,26 @@ class Simulation(object):
 
 
 	@classmethod
-	def complete_sim_cfg(cls,in_place=True,**sim_cfg):
+	def complete_sim_cfg(cls,in_place=False,**sim_cfg):
 		'''
 		Completes a partial sim_cfg dict with the default values
 		'''
 		sim_cfg = copy.deepcopy(sim_cfg)
-		if 'implementation' not in sim_cfg.keys():
-			sim_cfg['implementation'] = cls.default_implementation
-		if 'norm_exponent' not in sim_cfg.keys():
-			sim_cfg['norm_exponent'] = cls.default_norm_exponent
-		if 'propag_proba' not in sim_cfg.keys():
-			sim_cfg['propag_proba'] = cls.default_propag_proba
-		return sim_cfg
+
+		arg_list = ['propag_proba','norm_exponent','implementation']
+
+		for arg in arg_list:
+			if arg not in sim_cfg.keys():
+				sim_cfg[arg] = getattr(cls,'default_{}'.format(arg))
+		# if 'implementation' not in sim_cfg.keys():
+		# 	sim_cfg['implementation'] = cls.default_implementation
+		# if 'norm_exponent' not in sim_cfg.keys():
+		# 	sim_cfg['norm_exponent'] = cls.default_norm_exponent
+		# if 'propag_proba' not in sim_cfg.keys():
+		# 	sim_cfg['propag_proba'] = cls.default_propag_proba
+		
+
+		return {k:v for k,v in sim_cfg.items() if k in arg_list}
 
 
 	def set_network(self,network,bootstrap_sim):
@@ -75,7 +86,7 @@ class Simulation(object):
 			self.index_reverse = bootstrap_sim.index_reverse
 			self.propag_mat = bootstrap_sim.propag_mat
 			self.network_diameter = bootstrap_sim.network_diameter
-			
+
 		elif network is not None:
 			self.network = network
 			self.sparse_mat = nx.to_scipy_sparse_matrix(network).astype(np.bool)
@@ -218,7 +229,6 @@ class Simulation(object):
 				ans.add(n)
 		return ans
 
-
 	def compute_exact(self):
 		'''
 		Given a specific node, computes a resulting vector of probabilities of failure, based on a given process.
@@ -228,7 +238,9 @@ class Simulation(object):
 		else:
 			mat = self.propag_mat.copy()
 			fp_id = self.index_reverse[self.failing_project]
-			mat[fp_id,fp_id] = 1
+			with warnings.catch_warnings():
+				warnings.simplefilter('ignore',SparseEfficiencyWarning)
+				mat[fp_id,fp_id] = 1
 			N = 2*self.network_diameter
 			return (mat**N)[:,fp_id]
 
