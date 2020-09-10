@@ -289,6 +289,9 @@ class Database(object):
 		If there is a change in structure in the init script, this method should be called to 'reset' the state of the database
 		'''
 		logger.info('Cleaning database')
+		self.cursor.execute('DROP TABLE IF EXISTS measures;')
+		self.cursor.execute('DROP TABLE IF EXISTS computed_measures;')
+		self.cursor.execute('DROP TABLE IF EXISTS measure_types;')
 		self.cursor.execute('DROP TABLE IF EXISTS simulation_results;')
 		self.cursor.execute('DROP TABLE IF EXISTS simulations;')
 		self.cursor.execute('DROP TABLE IF EXISTS snapshot_data;')
@@ -297,9 +300,6 @@ class Database(object):
 		self.cursor.execute('DROP TABLE IF EXISTS deleted_dependencies;')
 		self.cursor.execute('DROP TABLE IF EXISTS versions;')
 		self.cursor.execute('DROP TABLE IF EXISTS projects;')
-		self.cursor.execute('DROP TABLE IF EXISTS measure_types;')
-		self.cursor.execute('DROP TABLE IF EXISTS measures;')
-		self.cursor.execute('DROP TABLE IF EXISTS computated_measures;')
 		self.connection.commit()
 
 	def remove_results(self):
@@ -317,12 +317,12 @@ class Database(object):
 		Removing measures and associated data from the database
 		'''
 		if measure is None:
-			self.cursor.execute('DELETE FROM measures CASCADE;')
+			self.cursor.execute('DELETE FROM measure_types CASCADE;')
 		else:
 			if self.db_type == 'postgres':
-				self.cursor.execute('DELETE FROM measures WHERE name=%s CASCADE;',(measure,))
+				self.cursor.execute('DELETE FROM measure_types WHERE name=%s CASCADE;',(measure,))
 			else:
-				self.cursor.execute('DELETE FROM measures WHERE name=? CASCADE;',(measure,))
+				self.cursor.execute('DELETE FROM measure_types WHERE name=? CASCADE;',(measure,))
 		self.connection.commit()
 
 	def remove_measure(self,measure):
