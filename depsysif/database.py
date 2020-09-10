@@ -38,7 +38,10 @@ class Database(object):
 	def __init__(self,db_type='sqlite',db_name='depsysif',db_folder='.',db_user='postgres',port='5432',host='localhost',password=None,clean_first=False):
 		self.db_type = db_type
 		if db_type == 'sqlite':
-			self.connection = sqlite3.connect(os.path.join(db_folder,'{}.db'.format(db_name)))
+			if db_name.startswith(':memory:'):
+				self.connection = sqlite3.connect(db_name)
+			else:
+				self.connection = sqlite3.connect(os.path.join(db_folder,'{}.db'.format(db_name)))
 			self.cursor = self.connection.cursor()
 		elif db_type == 'postgres':
 			if password is not None:
@@ -355,6 +358,7 @@ class Database(object):
 
 		if dependency_types is None:
 			dependency_types_check = False
+			dependency_types = []
 		else:
 			dependency_types_check = True
 

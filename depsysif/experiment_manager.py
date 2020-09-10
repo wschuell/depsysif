@@ -136,16 +136,19 @@ class ExperimentManager(object):
 				id_list = self.db.get_nodes(snapshot_id=snapid)
 			all_present = (len(sim_list) == nb_sim*len(id_list)) # assuming that everything is executed anyway, executed could be False only if code halted between simu creation in db and the computation of the simu, but conn commit should not happen in this interval anyway
 
-			for p_id in id_list:
+			if not all_present:
+				for p_id in id_list:
 
-				if network is None:
-					network = self.db.get_network(snapshot_id=snapid)
-				if bootstrap_sim is None:
-					bootstrap_sim = Simulation(network=network,failing_project=None,snapshot_id=snapid,**sim_cfg)
-
-				self.run_simulations(failing_project=p_id,snapshot_id=snapid,nb_sim=nb_sim,bootstrap_sim=bootstrap_sim,network=network,commit=False,**sim_cfg)
-				if commit:
-					self.db.connection.commit()
+					if network is None:
+						network = self.db.get_network(snapshot_id=snapid)
+					if bootstrap_sim is None:
+						bootstrap_sim = Simulation(network=network,failing_project=None,snapshot_id=snapid,**sim_cfg)
+	
+					self.run_simulations(failing_project=p_id,snapshot_id=snapid,nb_sim=nb_sim,bootstrap_sim=bootstrap_sim,network=network,commit=False,**sim_cfg)
+					if commit:
+						self.db.connection.commit()
+			else:
+				logger.info('All simulations already run for snapshot {}'.format(snapid))
 		else:
 			sim_list = self.list_simulations(failing_project=failing_project,snapshot_id=snapid,max_size=nb_sim,**sim_cfg)
 			for sim_id,exec_status,fp in sim_list:
@@ -423,7 +426,7 @@ class ExperimentManager(object):
 		else:
 			logger.info('Computing measure {} for snapshot {}'.format(measure,snapshot_id))
 			value_vec,projid_vec = measure_func(snapshot_id=snapshot_id,xp_man=self,**measure_cfg)
-			measure_cfg = measure_func.complete_cfg(**measure_cfg)
+			measure_cfg = getattr(measures,'complete_cfg_{}'.format(measure))(**measure_cfg)
 			self.db.fill_measures(measure=measure,snapshot_id=snapshot_id,value_vec=value_vec,projid_vec=projid_vec,**measure_cfg)
 			# 	logger.info('Computed measure {} for snapshot {}'.format(measure,snapshot_id))
 			# except:
@@ -445,7 +448,7 @@ class ExperimentManager(object):
 			measure_func = getattr(measures,measure)
 		except:
 			raise ValueError('Unknown measure {}'.format(measure))
-		measure_cfg = measure_func.complete_cfg(**measure_cfg)
+		measure_cfg = getattr(measures,'complete_cfg_{}'.format(measure))(**measure_cfg)
 		
 		if self.db.db_type == 'postgres':
 			self.db.cursor.execute('''

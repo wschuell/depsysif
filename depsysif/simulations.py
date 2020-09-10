@@ -24,7 +24,7 @@ class Simulation(object):
 	'''
 	default_propag_proba = 0.9
 	default_norm_exponent=0.
-	default_implementation = 'classic'
+	default_implementation = 'matrix'
 
 	def __init__(self,failing_project,network=None,propag_proba=default_propag_proba,norm_exponent=default_norm_exponent,implementation=default_implementation,random_seed=None,verbose=False,snapshot_id=None,set_network=True,bootstrap_sim=None):
 
@@ -229,20 +229,52 @@ class Simulation(object):
 				ans.add(n)
 		return ans
 
-	def compute_exact(self):
+	def propagate_exact(self,state_vector,source_id,count=None):
+		'''
+		propagation from one node to its neighbors, flow of probabilities
+
+		CAUTION: This is a recursive function, could trigger a cascade of calls
+		'''
+		for n in sorted(self.network.predecessors(source_id)): # sorted ensures that the process is deterministic (given the random seed)
+			nb_parents = len(list(self.network.successors(n)))
+			proba = self.propag_proba/nb_parents**self.norm_exponent #nb_parents is >=1, the source node at least is in this set
+			s_id = self.index_reverse[source_id]
+			t_id = self.index_reverse[n]
+			state_vector[t_id] = 1.- (1.-state_vector[t_id])*(1.-proba*state_vector[s_id])
+			if count is not None:
+				count += 1
+				if count % 10**4 == 0:
+					logger.info(count) 
+			self.propagate_exact(state_vector=state_vector,source_id=n,count=count)
+
+
+	def compute_exact(self,implementation='net'):
 		'''
 		Given a specific node, computes a resulting vector of probabilities of failure, based on a given process.
 		'''
 		if self.network_diameter is None:
 			raise ValueError('network diameter (or longest path length) is not well defined, network has cycles')
 		else:
-			mat = self.propag_mat.copy()
-			fp_id = self.index_reverse[self.failing_project]
-			with warnings.catch_warnings():
-				warnings.simplefilter('ignore',SparseEfficiencyWarning)
-				mat[fp_id,fp_id] = 1
-			N = 2*self.network_diameter
-			return (mat**N)[:,fp_id]
+			if implementation == 'mat': # still inexact, needs intermediate multiplicative state
+				mat = self.propag_mat.copy()
+				fp_id = self.index_reverse[self.failing_project]
+				with warnings.catch_warnings():
+					warnings.simplefilter('ignore',SparseEfficiencyWarning)
+					mat[fp_id,fp_id] = 1
+				N = 2*self.network_diameter
+				ans = (mat**N)[:,fp_id].todense()
+				ans = ans.reshape((ans.size,))
+				return ans
+
+			elif implementation == 'net': # can be quite long to compute, and considers variables independent
+				state_vector = np.zeros((len(self.network.nodes(),)))
+				fp_id = self.index_reverse[self.failing_project]
+				state_vector[fp_id]=1.
+				self.propagate_exact(state_vector=state_vector,source_id=self.failing_project)
+				return state_vector
+			else:
+				raise ValueError('Unknown implementation for compute_exact: {}'.format(implementation))
+
 
 
 	def make_copies(self,nb=1):
