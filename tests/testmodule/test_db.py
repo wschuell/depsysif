@@ -87,3 +87,15 @@ def test_id(testdb,timestamp,fullnetwork):
 def test_snapshot_getnet(testdb,timestamp,fullnetwork):
 	testdb.build_snapshot(snapshot_time=timestamp,full_network=fullnetwork)
 	testdb.get_network(snapshot_time=timestamp,full_network=fullnetwork)
+
+
+
+def test_move_to_ram(dbtype):
+	db = depsysif.database.Database(db_name='travis_ci_test_depsysif',db_type=dbtype)
+	db.clean_db()
+	db.init_db()
+	current_folder = os.path.dirname(os.path.abspath(__file__))
+	csv_folder = os.path.join(current_folder,'test_csvs','basic')
+	db.move_to_ram()
+	db.fill_from_csv(folder=csv_folder,headers_present=True)
+	db.get_back_from_ram()
