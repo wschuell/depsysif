@@ -1,6 +1,6 @@
 networkx
 matplotlib
-numpy
+numpy>=1.17
 pandas
 psycopg2
 scipy
