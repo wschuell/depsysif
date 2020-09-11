@@ -2,7 +2,7 @@ language: python
 services:
   - postgresql
 python:
-  - "3.6"
+  - "3.7"
 before_install:
  - sudo apt-get update -qq
 before_script:
