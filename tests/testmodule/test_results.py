@@ -72,6 +72,22 @@ normexp_list = [
 def norm_exponent(request):
 	return request.param
 
+pimp_list = [
+	'network',
+	'matrix'
+	]
+@pytest.fixture(params=pimp_list)
+def proba_implementation(request):
+	return request.param
+
+measurecfg_list = [
+	{'measure':'in_degree'},
+	{'measure':	'mean_cascade_length','nb_sim':10},
+	]
+@pytest.fixture(params=measurecfg_list)
+def measurecfg(request):
+	return request.param
+
 ##############
 
 #### Tests
@@ -99,3 +115,19 @@ def test_results_full_aggregated(testdb,timestamp):
 	snapid = testdb.get_snapshot_id(snapshot_time=timestamp)
 	xp_man.get_results_full(snapshot_id=snapid,result_type='counts',nb_sim=10,aggregated=True)
 	xp_man.get_results_full(snapshot_id=snapid,result_type='nb_failing',nb_sim=10,aggregated=True)
+
+
+### Measures
+def test_measure(testdb,timestamp,measurecfg):
+	xp_man = depsysif.experiment_manager.ExperimentManager(db=testdb)
+	xp_man.run_simulations(snapshot_time=timestamp,nb_sim=10)
+	snapid = testdb.get_snapshot_id(snapshot_time=timestamp)
+	xp_man.compute_measure(snapshot_id=snapid,**measurecfg)
+
+#### Proba exact
+
+def test_excomp(testdb,timestamp,proba_implementation):
+	xp_man = depsysif.experiment_manager.ExperimentManager(db=testdb)
+	xp_man.run_simulations(snapshot_time=timestamp,nb_sim=10)
+	snapid = testdb.get_snapshot_id(snapshot_time=timestamp)
+	xp_man.compute_exact_proba(snapshot_id=snapid,proba_implementation=proba_implementation)

@@ -106,10 +106,10 @@ class ExperimentManager(object):
 						ORDER BY executed,id
 						;''',(snapshot_id,json.dumps(sim_cfg, indent=None, sort_keys=True)))
 				else:
-					self.db.cursor.execute(''' 
+					self.db.cursor.execute('''
 						SELECT s1.id,s1.executed,s1.failing_project FROM projects p
 							JOIN simulations s1
-								ON s1.id IN 
+								ON s1.id IN
 									(SELECT s2.id FROM simulations s2
 										WHERE s2.snapshot_id = ?
 										AND s2.sim_cfg = ?
@@ -143,7 +143,7 @@ class ExperimentManager(object):
 						network = self.db.get_network(snapshot_id=snapid)
 					if bootstrap_sim is None:
 						bootstrap_sim = Simulation(network=network,failing_project=None,snapshot_id=snapid,**sim_cfg)
-	
+
 					self.run_simulations(failing_project=p_id,snapshot_id=snapid,nb_sim=nb_sim,bootstrap_sim=bootstrap_sim,network=network,commit=False,**sim_cfg)
 					if commit:
 						self.db.connection.commit()
@@ -408,7 +408,7 @@ class ExperimentManager(object):
 		else:
 			raise ValueError('Unknown result_type: {}'.format(result_type))
 
-	def compute_measure(self,measure,snapshot_id=None,**measure_cfg):
+	def compute_measure(self,measure,snapshot_id=None,bootstrap_dict=None,**measure_cfg):
 		'''
 		Computes measure for all projects, for a given snapshot or iterating through all snapshots
 		'''
@@ -422,15 +422,15 @@ class ExperimentManager(object):
 			self.db.cursor.execute('SELECT id FROM snapshots;')
 			snapshot_id_list = [ r[0] for r in self.db.cursor.fetchall()]
 			for snapid in snapshot_id_list:
-				self.compute_measure(measure=measure,snapshot_id=snapid,**measure_cfg)
+				self.compute_measure(measure=measure,snapshot_id=snapid,bootstrap_dict=bootstrap_dict,**measure_cfg)
 		else:
-			logger.info('Computing measure {} for snapshot {}'.format(measure,snapshot_id))
-			value_vec,projid_vec = measure_func(snapshot_id=snapshot_id,xp_man=self,**measure_cfg)
 			measure_cfg = getattr(measures,'complete_cfg_{}'.format(measure))(**measure_cfg)
-			self.db.fill_measures(measure=measure,snapshot_id=snapshot_id,value_vec=value_vec,projid_vec=projid_vec,**measure_cfg)
-			# 	logger.info('Computed measure {} for snapshot {}'.format(measure,snapshot_id))
-			# except:
-			# 	logger.info('Measure {} for snapshot {} already computed'.format(measure,snapshot_id))
+			if not self.db.check_measure(measure=measure,snapshot_id=snapshot_id,**measure_cfg):
+				logger.info('Computing measure {} for snapshot {}'.format(measure,snapshot_id))
+				value_vec,projid_vec = measure_func(snapshot_id=snapshot_id,xp_man=self,bootstrap_dict=bootstrap_dict,**measure_cfg)
+				self.db.fill_measures(measure=measure,snapshot_id=snapshot_id,value_vec=value_vec,projid_vec=projid_vec,**measure_cfg)
+			else:
+				logger.info('Measure {} for snapshot {} already computed'.format(measure,snapshot_id))
 
 
 	def plot_measure(self,measure,project_name=None,project_id=None,show=True,**measure_cfg):
@@ -449,7 +449,7 @@ class ExperimentManager(object):
 		except:
 			raise ValueError('Unknown measure {}'.format(measure))
 		measure_cfg = getattr(measures,'complete_cfg_{}'.format(measure))(**measure_cfg)
-		
+
 		if self.db.db_type == 'postgres':
 			self.db.cursor.execute('''
 				SELECT m.value,s.snapshot_time FROM measures m
@@ -485,3 +485,29 @@ class ExperimentManager(object):
 
 		if show:
 			plt.show()
+
+
+	def compute_exact_proba(self,snapshot_id=None,bootstrap_dict=None,proba_implementation='network',**sim_cfg):
+		'''
+		Computes proba distributions for all projects, for a given snapshot or iterating through all snapshots and source failing_project
+		'''
+		if snapshot_id is None:
+			logger.info('Computing proba_distrib {} for all snapshots'.format(measure))
+			self.db.cursor.execute('SELECT id FROM snapshots;')
+			snapshot_id_list = [ r[0] for r in self.db.cursor.fetchall()]
+			for snapid in snapshot_id_list:
+				self.compute_exact_proba(snapshot_id=snapid,bootstrap_dict=bootstrap_dict,proba_implementation=proba_implementation,**sim_cfg)
+		else:
+			logger.info('Computing proba_distrib for snapshot {}'.format(snapshot_id))
+			sim_cfg = Simulation.complete_sim_cfg(**sim_cfg)
+			if not self.db.check_excomp(snapshot_id=snapshot_id,proba_implementation=proba_implementation,**sim_cfg):
+				network = self.db.get_network(snapshot_id=snapshot_id)
+				sim = Simulation(failing_project=None,snapshot_id=snapshot_id,network=network,**sim_cfg)
+				projid_vec = self.get_id_vector(snapshot_id=snapshot_id)
+				for p_id in projid_vec:
+					logger.info('Computing proba distrib for snapshot {} with source failing project {}'.format(snapshot_id,p_id))
+					sim.failing_project = p_id
+					value_vec = sim.compute_exact(implementation=proba_implementation)
+					self.db.fill_exact_comp(snapshot_id=snapshot_id,source_id=p_id,value_vec=value_vec,projid_vec=projid_vec,commit=False,proba_implementation=proba_implementation,**sim_cfg)
+			else:
+				logger.info('Proba distrib for snapshot {} already computed'.format(measure,snapshot_id))

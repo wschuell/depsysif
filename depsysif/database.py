@@ -40,8 +40,11 @@ class Database(object):
 		if db_type == 'sqlite':
 			if db_name.startswith(':memory:'):
 				self.connection = sqlite3.connect(db_name)
+				self.in_ram = True
 			else:
-				self.connection = sqlite3.connect(os.path.join(db_folder,'{}.db'.format(db_name)))
+				self.in_ram = False
+				self.db_path = os.path.join(db_folder,'{}.db'.format(db_name))
+				self.connection = sqlite3.connect(self.db_path)
 			self.cursor = self.connection.cursor()
 		elif db_type == 'postgres':
 			if password is not None:
@@ -170,6 +173,22 @@ class Database(object):
 
 				CREATE INDEX IF NOT EXISTS measures_byproj ON measures(measure_id,project_id,snapshot_id);
 
+				CREATE TABLE IF NOT EXISTS exact_computation(
+				id INTEGER PRIMARY KEY,
+				snapshot_id INTEGER REFERENCES snapshots(id) ON DELETE CASCADE,
+				cfg TEXT,
+				UNIQUE(snapshot_id,cfg)
+				);
+
+
+				CREATE TABLE IF NOT EXISTS exact_computation_values(
+				exact_comp_id BIGINT REFERENCES exact_computation(id) ON DELETE CASCADE,
+				source_id  BIGINT REFERENCES projects(id) ON DELETE CASCADE,
+				target_id  BIGINT REFERENCES projects(id) ON DELETE CASCADE,
+				proba_value REAL NOT NULL,
+				PRIMARY KEY(exact_comp_id,source_id,target_id)
+				);
+				CREATE INDEX IF NOT EXISTS ex_comp_val_idx2 ON exact_computation_values(exact_comp_id,target_id,source_id);
 				'''
 			for q in DB_INIT.split(';')[:-1]:
 				self.cursor.execute(q)
@@ -283,8 +302,65 @@ class Database(object):
 				);
 
 				CREATE INDEX IF NOT EXISTS measures_byproj ON measures(measure_id,project_id,snapshot_id);
+
+				CREATE TABLE IF NOT EXISTS exact_computation(
+				id BIGSERIAL PRIMARY KEY,
+				snapshot_id BIGINT REFERENCES snapshots(id) ON DELETE CASCADE,
+				cfg JSONB,
+				UNIQUE(snapshot_id,cfg)
+				);
+
+
+				CREATE TABLE IF NOT EXISTS exact_computation_values(
+				exact_comp_id BIGINT REFERENCES exact_computation(id) ON DELETE CASCADE,
+				source_id  BIGINT REFERENCES projects(id) ON DELETE CASCADE,
+				target_id  BIGINT REFERENCES projects(id) ON DELETE CASCADE,
+				proba_value REAL NOT NULL,
+				PRIMARY KEY(exact_comp_id,source_id,target_id)
+				);
+				CREATE INDEX IF NOT EXISTS ex_comp_val_idx2 ON exact_computation_values(exact_comp_id,target_id,source_id);
 				''')
+
 			self.connection.commit()
+
+	def move_to_ram(self):
+		'''
+		For sqlite DBs, when doing extensive inserts etc (run_simulations for example), may be useful.
+		get_back_from_ram needed though to
+		'''
+		if not self.db_type == 'sqlite':
+			logger.info('The DB cannot be moved to the RAM, only available for SQLite DBs')
+		elif not self.in_ram:
+			logger.info('Moving DB to RAM')
+			if not hasattr(self,'ram_connection'):
+				self.ram_connection = sqlite3.connect('file:{}?mode=memory&cache=shared'.format(self.db_path),uri=True)
+				self.ram_cursor = self.ram_connection.cursor()
+				self.file_connection = self.connection
+				self.file_cursor = self.cursor
+			self.connection.backup(self.ram_connection)
+
+			self.connection = self.ram_connection
+			self.cursor = self.ram_cursor
+
+			self.in_ram = True
+			logger.info('Moved DB to RAM')
+
+	def get_back_from_ram(self):
+		'''
+		See comment at move_to_ram
+		'''
+		if not self.db_type == 'sqlite':
+			logger.info('The DB cannot be moved to/retrieved from the RAM, only available for SQLite DBs')
+		elif self.in_ram:
+			logger.info('Retrieving DB from RAM')
+			self.connection.backup(self.file_connection)
+
+			self.connection = self.file_connection
+			self.cursor = self.file_cursor
+
+			self.in_ram = False
+			logger.info('Retrieved DB from RAM')
+
 
 	def clean_db(self):
 		'''
@@ -292,6 +368,8 @@ class Database(object):
 		If there is a change in structure in the init script, this method should be called to 'reset' the state of the database
 		'''
 		logger.info('Cleaning database')
+		self.cursor.execute('DROP TABLE IF EXISTS exact_computation_values;')
+		self.cursor.execute('DROP TABLE IF EXISTS exact_computation;')
 		self.cursor.execute('DROP TABLE IF EXISTS measures;')
 		self.cursor.execute('DROP TABLE IF EXISTS computed_measures;')
 		self.cursor.execute('DROP TABLE IF EXISTS measure_types;')
@@ -313,6 +391,10 @@ class Database(object):
 	def remove_snapshots(self):
 		self.cursor.execute('DELETE FROM snapshot_data CASCADE;')
 		self.cursor.execute('DELETE FROM snapshots CASCADE;')
+		self.connection.commit()
+
+	def remove_exact_comp(self):
+		self.cursor.execute('DELETE FROM exact_computation CASCADE;')
 		self.connection.commit()
 
 	def remove_measures(self,measure=None):
@@ -1179,3 +1261,87 @@ class Database(object):
 			self.connection.commit()
 			logger.info('Filled in measure {} for snapshot {}'.format(measure,snapshot_id))
 
+
+	def fill_exact_comp(self,snapshot_id,source_id,value_vec,projid_vec,commit=True,**sim_cfg):
+		'''
+		Fills in results of an exact proba distrib computation
+		TODO: autocomplete cfg
+		'''
+		if self.db_type == 'postgres':
+			self.cursor.execute('INSERT INTO exact_computation(snapshot_id,cfg) VALUES(%s,%s) ON CONFLICT DO NOTHING;',(snapshot_id,json.dumps(sim_cfg, indent=None, sort_keys=True)))
+			self.cursor.execute('SELECT id FROM exact_computation WHERE snapshot_id=%s AND cfg=%s;',(snapshot_id,json.dumps(sim_cfg, indent=None, sort_keys=True)))
+		else:
+			self.cursor.execute('INSERT OR IGNORE INTO exact_computation(snapshot_id,cfg) VALUES(?,?);',(snapshot_id,json.dumps(sim_cfg, indent=None, sort_keys=True)))
+			self.cursor.execute('SELECT id FROM exact_computation WHERE snapshot_id=? AND cfg=?;',(snapshot_id,json.dumps(sim_cfg, indent=None, sort_keys=True)))
+
+		excomp_id = self.cursor.fetchone()[0]
+
+		# if self.db_type == 'postgres':
+		# 	self.cursor.execute('SELECT * FROM  computed_measures WHERE measure_id=%s AND snapshot_id=%s;',(measure_id,snapshot_id))
+		# else:
+		# 	self.cursor.execute('SELECT * FROM  computed_measures WHERE measure_id=? AND snapshot_id=?;',(measure_id,snapshot_id))
+
+		if self.cursor.fetchone() is not None:
+			logger.info('Proba distrib for snapshot {} for source_id already filled in'.format(snapshot_id,source_id))
+		else:
+			logger.info('Filling in proba distrib for snapshot {} for source_id {}'.format(snapshot_id,source_id))
+
+			# if self.db_type == 'postgres':
+			# 	self.cursor.execute('INSERT INTO computed_measures(measure_id,snapshot_id) VALUES(%s,%s);',(measure_id,snapshot_id))
+			# else:
+			# 	self.cursor.execute('INSERT INTO computed_measures(measure_id,snapshot_id) VALUES(?,?);',(measure_id,snapshot_id))
+
+			if self.db_type == 'postgres':
+				extras.execute_batch(self.cursor,'INSERT INTO exact_computation_values(exact_comp_id,source_id,target_id,proba_value) VALUES(%s,%s,%s,%s);',((excomp_id,source_id,p_id,val) for p_id,val in zip(projid_vec,value_vec) if val!=0))
+			else:
+				self.cursor.executemany('INSERT INTO exact_computation_values(exact_comp_id,source_id,target_id,proba_value) VALUES(?,?,?,?);',((excomp_id,source_id,p_id,val) for p_id,val in zip(projid_vec,value_vec) if val!=0))
+
+			if commit:
+				self.connection.commit()
+			logger.info('Filled in proba_distrib for snapshot {} for source_id {}'.format(snapshot_id,source_id))
+
+
+
+	def check_measure(self,measure,snapshot_id,**measure_cfg):
+		'''
+		Check if a measure has already been computed, returns bool
+		'''
+		if self.db_type == 'postgres':
+			self.cursor.execute('''SELECT * FROM computed_measures cm
+									INNER JOIN measure_types mt
+									ON cm.snapshot_id=%s AND mt.id=cm.measure_id
+									AND mt.name=%s AND mt.cfg=%s
+									LIMIT 1
+								;''',(snapshot_id,measure,json.dumps(measure_cfg, indent=None, sort_keys=True)))
+		else:
+			self.cursor.execute('''SELECT * FROM computed_measures cm
+									INNER JOIN measure_types mt
+									ON cm.snapshot_id=? AND mt.id=cm.measure_id
+									AND mt.name=? AND mt.cfg=?
+									LIMIT 1
+								;''',(snapshot_id,measure,json.dumps(measure_cfg, indent=None, sort_keys=True)))
+		ans = self.cursor.fetchone()
+		if ans is not None:
+			return True
+		else:
+			return False
+
+	def check_excomp(self,snapshot_id,**cfg):
+		'''
+		Check if a proba_distrib has already been computed, returns bool
+		'''
+		if self.db_type == 'postgres':
+			self.cursor.execute('''SELECT * FROM exact_computation
+									WHERE snapshot_id=%s AND cfg=%s
+									LIMIT 1
+								;''',(snapshot_id,json.dumps(cfg, indent=None, sort_keys=True)))
+		else:
+			self.cursor.execute('''SELECT * FROM exact_computation
+									WHERE snapshot_id=? AND cfg=?
+									LIMIT 1
+								;''',(snapshot_id,json.dumps(cfg, indent=None, sort_keys=True)))
+		ans = self.cursor.fetchone()
+		if ans is not None:
+			return True
+		else:
+			return False

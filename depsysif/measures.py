@@ -3,7 +3,7 @@ from . import simulations
 
 ###################
 ###################
-def in_degree(snapshot_id,xp_man):
+def in_degree(snapshot_id,xp_man,bootstrap_dict=None):
 	'''
 	in degree of each project
 	'''
@@ -27,7 +27,7 @@ def complete_cfg_in_degree(**measure_cfg):
 
 ###################
 ###################
-def out_degree(snapshot_id,xp_man):
+def out_degree(snapshot_id,xp_man,bootstrap_dict=None):
 	'''
 	out degree of each project
 	'''
@@ -50,7 +50,7 @@ def complete_cfg_out_degree(**measure_cfg):
 
 ###################
 ###################
-def mean_cascade_length(snapshot_id,xp_man,nb_sim,**sim_cfg):
+def mean_cascade_length(snapshot_id,xp_man,nb_sim,bootstrap_dict=None,**sim_cfg):
 	'''
 	mean_cascade_length for each project as in number of affected projects when used as a source of failure, average over number of available simulations
 	'''

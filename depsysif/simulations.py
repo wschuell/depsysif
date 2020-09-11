@@ -70,7 +70,7 @@ class Simulation(object):
 		# 	sim_cfg['norm_exponent'] = cls.default_norm_exponent
 		# if 'propag_proba' not in sim_cfg.keys():
 		# 	sim_cfg['propag_proba'] = cls.default_propag_proba
-		
+
 
 		return {k:v for k,v in sim_cfg.items() if k in arg_list}
 
@@ -244,29 +244,29 @@ class Simulation(object):
 			if count is not None:
 				count += 1
 				if count % 10**4 == 0:
-					logger.info(count) 
+					logger.info(count)
 			self.propagate_exact(state_vector=state_vector,source_id=n,count=count)
 
 
-	def compute_exact(self,implementation='net'):
+	def compute_exact(self,implementation='network'):
 		'''
 		Given a specific node, computes a resulting vector of probabilities of failure, based on a given process.
 		'''
 		if self.network_diameter is None:
 			raise ValueError('network diameter (or longest path length) is not well defined, network has cycles')
 		else:
-			if implementation == 'mat': # still inexact, needs intermediate multiplicative state
+			if implementation == 'matrix': # still inexact, needs intermediate multiplicative state
 				mat = self.propag_mat.copy()
 				fp_id = self.index_reverse[self.failing_project]
 				with warnings.catch_warnings():
 					warnings.simplefilter('ignore',SparseEfficiencyWarning)
 					mat[fp_id,fp_id] = 1
 				N = 2*self.network_diameter
-				ans = (mat**N)[:,fp_id].todense()
+				ans = (mat**N)[:,fp_id].toarray()
 				ans = ans.reshape((ans.size,))
 				return ans
 
-			elif implementation == 'net': # can be quite long to compute, and considers variables independent
+			elif implementation == 'network': # can be quite long to compute, and considers variables independent
 				state_vector = np.zeros((len(self.network.nodes(),)))
 				fp_id = self.index_reverse[self.failing_project]
 				state_vector[fp_id]=1.
