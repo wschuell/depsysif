@@ -3,47 +3,59 @@ from . import simulations
 
 ###################
 ###################
-def in_degree(snapshot_id,xp_man,bootstrap_dict=None):
+def in_degree(snapshot_id,xp_man,bootstrap_dict=None,order=1):
 	'''
-	in degree of each project
+	in degree of each project, to nth order (default one)
 	'''
 
 	net = xp_man.db.get_network(snapshot_id=snapshot_id)
-
 	value_vec = []
 	projid_vec = []
-	for k,v in dict(net.in_degree()).items():
-		value_vec.append(v)
-		projid_vec.append(k)
+
+	if order == 1:
+		#classic case
+		for k,v in dict(net.in_degree()).items():
+			value_vec.append(v)
+			projid_vec.append(k)
+	elif order>1:
+		# order is integer
+		for o in order:
+			for k,v in dict(net.in_degree()).items():
+				value_vec.append(v)
+				projid_vec.append(k)
+	else:
+		#'infinite order'
+		pass
 
 	return np.asarray(value_vec),np.asarray(projid_vec)
 
 ###################
-def complete_cfg_in_degree(**measure_cfg):
-	return {}
+def complete_cfg_in_degree(order=1,**measure_cfg):
+	return {'order':order}
 ###################
 ###################
 
 
 ###################
 ###################
-def out_degree(snapshot_id,xp_man,bootstrap_dict=None):
+def out_degree(snapshot_id,xp_man,bootstrap_dict=None,order=1):
 	'''
 	out degree of each project
 	'''
 	net = xp_man.db.get_network(snapshot_id=snapshot_id)
 
-	value_vec = []
-	projid_vec = []
-	for k,v in dict(net.out_degree()).items():
-		value_vec.append(v)
-		projid_vec.append(k)
+	if order == 1:
+		value_vec = []
+		projid_vec = []
+		for k,v in dict(net.out_degree()).items():
+			value_vec.append(v)
+			projid_vec.append(k)
 
 	return np.asarray(value_vec),np.asarray(projid_vec)
 
 ###################
-def complete_cfg_out_degree(**measure_cfg):
-	return {}
+def complete_cfg_out_degree(order=1,**measure_cfg):
+	return {'order':order}
 ###################
 ###################
 
