@@ -44,6 +44,8 @@ class Database(object):
 			else:
 				self.in_ram = False
 				self.db_path = os.path.join(db_folder,'{}.db'.format(db_name))
+				if not os.path.exists(db_folder):
+					os.makedirs(db_folder)
 				self.connection = sqlite3.connect(self.db_path)
 			self.cursor = self.connection.cursor()
 		elif db_type == 'postgres':

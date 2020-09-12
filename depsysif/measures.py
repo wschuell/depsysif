@@ -2,6 +2,7 @@ import numpy as np
 from . import simulations
 
 ###################
+# IN DEGREE
 ###################
 def in_degree(snapshot_id,xp_man,bootstrap_dict=None,order=1):
 	'''
@@ -19,13 +20,14 @@ def in_degree(snapshot_id,xp_man,bootstrap_dict=None,order=1):
 			projid_vec.append(k)
 	elif order>1:
 		# order is integer
+		raise NotImplementedError
 		for o in order:
 			for k,v in dict(net.in_degree()).items():
 				value_vec.append(v)
 				projid_vec.append(k)
 	else:
 		#'infinite order'
-		pass
+		raise NotImplementedError
 
 	return np.asarray(value_vec),np.asarray(projid_vec)
 
@@ -37,6 +39,7 @@ def complete_cfg_in_degree(order=1,**measure_cfg):
 
 
 ###################
+# OUT DEGREE
 ###################
 def out_degree(snapshot_id,xp_man,bootstrap_dict=None,order=1):
 	'''
@@ -50,6 +53,8 @@ def out_degree(snapshot_id,xp_man,bootstrap_dict=None,order=1):
 		for k,v in dict(net.out_degree()).items():
 			value_vec.append(v)
 			projid_vec.append(k)
+	else:
+		raise NotImplementedError
 
 	return np.asarray(value_vec),np.asarray(projid_vec)
 
@@ -61,6 +66,7 @@ def complete_cfg_out_degree(order=1,**measure_cfg):
 
 
 ###################
+#MEAN CASCADE LENGTH
 ###################
 def mean_cascade_length(snapshot_id,xp_man,nb_sim,bootstrap_dict=None,**sim_cfg):
 	'''
