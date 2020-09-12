@@ -83,5 +83,5 @@ plt.show() # shows a plot with a curve for each package, (x,y)=(time,measure), o
 xp_man.compute_exact_proba(implementation='network') # or implementation='matrix'
 
 #Plot proba distribution
-xp_man.
+<measure to be implemented>
 ```
