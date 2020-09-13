@@ -694,13 +694,17 @@ class Database(object):
 		if ans is not None:
 			snapid,snapname = ans
 			logger.info('Snapshot with full_network={} and snapshot_time={} already exists. Id: {}, Name: {}'.format(full_network,snapshot_time,snapid,snapname))
-			if self.db_type == 'postgres':
-				self.cursor.execute('SELECT * FROM snapshot_data WHERE snapshot_id=%s LIMIT 1;',(snapid,))
-			else:
-				self.cursor.execute('SELECT * FROM snapshot_data WHERE snapshot_id=? LIMIT 1;',(snapid,))
-			if self.cursor.fetchone() is not None:
-				logger.info('Snapshot data already filled, skipping')
-				return
+
+			###### The following lines are commented because snapshot data is automatically field after creatin, and no commits happen between snapshot creation and data filling
+			###### This speeds up the process when reexecuting build_snapshot
+			# if self.db_type == 'postgres':
+			# 	self.cursor.execute('SELECT * FROM snapshot_data WHERE snapshot_id=%s LIMIT 1;',(snapid,))
+			# else:
+			# 	self.cursor.execute('SELECT * FROM snapshot_data WHERE snapshot_id=? LIMIT 1;',(snapid,))
+			# if self.cursor.fetchone() is not None:
+			# 	logger.info('Snapshot data already filled, skipping')
+			# 	return
+			return
 
 		else:
 			logger.info('Creating snapshot with full_network={} and snapshot_time={}'.format(full_network,snapshot_time))
@@ -1125,7 +1129,10 @@ class Database(object):
 						self.register_simulation(simulation=simulation,snapshot_id=snapshot_id)
 						return
 					else:
-						sim_id = sim_id_list[0]
+						sim_id,executed = sim_id_list[0]
+					if executed:
+						logger.info('Simulation results already filled in')
+						return
 				extras.execute_batch(self.cursor,'''
 						INSERT INTO simulation_results(simulation_id,failing)
 						VALUES(%s,%s)

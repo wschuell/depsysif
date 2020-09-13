@@ -5,9 +5,11 @@ from . import measures
 import json
 import logging
 import numpy as np
+import copy
 # from scipy import sparse
 import  scipy.sparse
 from matplotlib import pyplot as plt
+import matplotlib.dates as mdates
 
 logger = logging.getLogger(__name__)
 ch = logging.StreamHandler()
@@ -206,6 +208,8 @@ class ExperimentManager(object):
 
 		index_reverse = {n:i for i,n in enumerate(id_vec)}
 
+		query_results = None # for combining chunks of queries, SQLite does not accept >999 variables per query
+
 		if failing_project is None:
 			return self.get_results_full(snapshot_id=snapid,nb_sim=nb_sim,result_type=result_type,aggregated=aggregated,**sim_cfg)
 		else:
@@ -227,13 +231,23 @@ class ExperimentManager(object):
 							ORDER BY simulation_id,failing
 						;''',(tuple(sim_id_list),))
 				else:
-					self.db.cursor.execute('''
-						SELECT simulation_id,failing FROM simulation_results
-							WHERE simulation_id IN ({})
-							ORDER BY simulation_id,failing
-						;'''.format(','.join(['?' for _ in sim_id_list])),sim_id_list)
+					sim_id_list_temp = copy.deepcopy(sim_id_list)
+					query_results = []
+					while len(sim_id_list_temp)>0:
+						sim_id_list_chunk = sim_id_list_temp[:999]
+						del sim_id_list_temp[:999]
+						self.db.cursor.execute('''
+							SELECT simulation_id,failing FROM simulation_results
+								WHERE simulation_id IN ({})
+								ORDER BY simulation_id,failing
+							;'''.format(','.join(['?' for _ in sim_id_list_chunk])),sim_id_list_chunk)
+						query_results += list(self.db.cursor.fetchall())
 
-				results_data = [(index_reverse[fp],reverse_sim_index[s_id],True) for s_id,fp in self.db.cursor.fetchall()]
+
+				if query_results is None:
+					query_results = list(self.db.cursor.fetchall())
+
+				results_data = [(index_reverse[fp],reverse_sim_index[s_id],True) for s_id,fp in query_results]
 				results_v = np.asarray([r[2] for r in results_data])
 				results_i = np.asarray([r[0] for r in results_data])
 				results_j = np.asarray([r[1] for r in results_data])
@@ -250,14 +264,22 @@ class ExperimentManager(object):
 							GROUP BY failing
 						;''',(tuple(sim_id_list),))
 				else:
-					self.db.cursor.execute('''
-						SELECT COUNT(*),failing FROM simulation_results
-							WHERE simulation_id IN ({})
-							GROUP BY failing
-						;'''.format(','.join(['?' for _ in sim_id_list])),sim_id_list)
+					sim_id_list_temp = copy.deepcopy(sim_id_list)
+					query_results = []
+					while len(sim_id_list_temp)>0:
+						sim_id_list_chunk = sim_id_list_temp[:999]
+						del sim_id_list_temp[:999]
+						self.db.cursor.execute('''
+							SELECT COUNT(*),failing FROM simulation_results
+								WHERE simulation_id IN ({})
+								GROUP BY failing
+							;'''.format(','.join(['?' for _ in sim_id_list_chunk])),sim_id_list_chunk)
+						query_results += list(self.db.cursor.fetchall())
 
+				if query_results is None:
+					query_results = list(self.db.cursor.fetchall())
 				results = np.zeros((len(id_vec),))
-				for val,fp in self.db.cursor.fetchall():
+				for val,fp in query_results:
 					results[index_reverse[fp]] = val
 				return results
 			#### NB FAILING   returns nparray[sim]
@@ -269,14 +291,22 @@ class ExperimentManager(object):
 							GROUP BY simulation_id
 						;''',(tuple(sim_id_list),))
 				else:
-					self.db.cursor.execute('''
-						SELECT COUNT(*),simulation_id FROM simulation_results
-							WHERE simulation_id IN ({})
-							GROUP BY simulation_id
-						;'''.format(','.join(['?' for _ in sim_id_list])),sim_id_list)
+					sim_id_list_temp = copy.deepcopy(sim_id_list)
+					query_results = []
+					while len(sim_id_list_temp)>0:
+						sim_id_list_chunk = sim_id_list_temp[:999]
+						del sim_id_list_temp[:999]
+						self.db.cursor.execute('''
+							SELECT COUNT(*),simulation_id FROM simulation_results
+								WHERE simulation_id IN ({})
+								GROUP BY simulation_id
+							;'''.format(','.join(['?' for _ in sim_id_list_chunk])),sim_id_list_chunk)
+						query_results += list(self.db.cursor.fetchall())
 
 				results = np.zeros((len(sim_id_list),))
-				for val,s_id in self.db.cursor.fetchall():
+				if query_results is None:
+					query_results = list(self.db.cursor.fetchall())
+				for val,s_id in query_results: #using query_results and not cursor.fetchall() to allow for chunked queries in sqlite. Not more than 999 variables allowed per query
 					results[reverse_sim_index[s_id]] = val
 				return results
 			else:
@@ -302,6 +332,9 @@ class ExperimentManager(object):
 
 		sim_id_list = sorted([s_id for s_id,exec_status,fp in sim_list])
 		reverse_sim_index = {s:i for i,s in enumerate(sim_id_list)}
+
+		query_results = None # for combining chunks of queries, SQLite does not accept >999 variables per query
+
 		#### RAW   returns sparse_mat[project,sim] . along the sim dimension, all of them are here (no failing_project dim), hence a length of nb_sim*nb_projects
 		if result_type == 'raw':
 			if aggregated:
@@ -315,15 +348,23 @@ class ExperimentManager(object):
 							ORDER BY sr.simulation_id,sr.failing
 						;''',(tuple(sim_id_list),))
 				else:
-					self.db.cursor.execute('''
-						SELECT sr.simulation_id,sr.failing,s.failing_project FROM simulation_results sr
-							INNER JOIN simulations s
-							ON sr.simulation_id IN ({}) AND s.id=sr.simulation_id
-							ORDER BY sr.simulation_id,s.failing_project,sr.failing
-						;'''.format(','.join(['?' for _ in sim_id_list])),sim_id_list)
+					sim_id_list_temp = copy.deepcopy(sim_id_list)
+					query_results = []
+					while len(sim_id_list_temp)>0:
+						sim_id_list_chunk = sim_id_list_temp[:999]
+						del sim_id_list_temp[:999]
+						self.db.cursor.execute('''
+							SELECT sr.simulation_id,sr.failing,s.failing_project FROM simulation_results sr
+								INNER JOIN simulations s
+								ON sr.simulation_id IN ({}) AND s.id=sr.simulation_id
+								ORDER BY sr.simulation_id,s.failing_project,sr.failing
+							;'''.format(','.join(['?' for _ in sim_id_list_chunk])),sim_id_list_chunk)
+						query_results += list(self.db.cursor.fetchall())
 
+				if query_results is None:
+					query_results = list(self.db.cursor.fetchall())
 
-				results_data = [(index_reverse[fp],reverse_sim_index[s_id],True) for s_id,fp,orig_fp in self.db.cursor.fetchall()]
+				results_data = [(index_reverse[fp],reverse_sim_index[s_id],True) for s_id,fp,orig_fp in query_results]
 				results_v = np.asarray([r[2] for r in results_data])
 				results_i = np.asarray([r[0] for r in results_data])
 				results_j = np.asarray([r[1] for r in results_data])
@@ -342,14 +383,24 @@ class ExperimentManager(object):
 						ORDER BY sr.failing,s.failing_project
 					;''',(tuple(sim_id_list),))
 			else:
-				self.db.cursor.execute('''
-					SELECT sr.failing,s.failing_project,COUNT(*)  FROM simulation_results sr
-						INNER JOIN simulations s
-						ON sr.simulation_id IN ({}) AND s.id=sr.simulation_id
-						GROUP BY sr.failing,s.failing_project
-						ORDER BY sr.failing,s.failing_project
-						;'''.format(','.join(['?' for _ in sim_id_list])),sim_id_list)
+				sim_id_list_temp = copy.deepcopy(sim_id_list)
+				query_results = []
+				while len(sim_id_list_temp)>0:
+					sim_id_list_chunk = sim_id_list_temp[:999]
+					del sim_id_list_temp[:999]
+					self.db.cursor.execute('''
+						SELECT sr.failing,s.failing_project,COUNT(*)  FROM simulation_results sr
+							INNER JOIN simulations s
+							ON sr.simulation_id IN ({}) AND s.id=sr.simulation_id
+							GROUP BY sr.failing,s.failing_project
+							ORDER BY sr.failing,s.failing_project
+							;'''.format(','.join(['?' for _ in sim_id_list_chunk])),sim_id_list_chunk)
+					query_results += list(self.db.cursor.fetchall())
 			# results = sparse.coo_matrix((nb_nodes,nb_sim))
+
+			if query_results is None:
+				query_results = list(self.db.cursor.fetchall())
+
 			if aggregated:
 				results = np.zeros((len(id_vec),))
 				for fp,orig_fp,val in self.db.cursor.fetchall():
@@ -383,22 +434,31 @@ class ExperimentManager(object):
 						ORDER BY sr.simulation_id,s.failing_project
 					;''',(tuple(sim_id_list),))
 			else:
-				self.db.cursor.execute('''
-					SELECT sr.simulation_id,s.failing_project,COUNT(*)  FROM simulation_results sr
-						INNER JOIN simulations s
-						ON sr.simulation_id IN ({}) AND s.id=sr.simulation_id
-						GROUP BY sr.simulation_id,s.failing_project
-						ORDER BY sr.simulation_id,s.failing_project
-						;'''.format(','.join(['?' for _ in sim_id_list])),sim_id_list)
+				sim_id_list_temp = copy.deepcopy(sim_id_list)
+				query_results = []
+				while len(sim_id_list_temp)>0:
+					sim_id_list_chunk = sim_id_list_temp[:999]
+					del sim_id_list_temp[:999]
+					self.db.cursor.execute('''
+						SELECT sr.simulation_id,s.failing_project,COUNT(*)  FROM simulation_results sr
+							INNER JOIN simulations s
+							ON sr.simulation_id IN ({}) AND s.id=sr.simulation_id
+							GROUP BY sr.simulation_id,s.failing_project
+							ORDER BY sr.simulation_id,s.failing_project
+							;'''.format(','.join(['?' for _ in sim_id_list_chunk])),sim_id_list_chunk)
+					query_results += list(self.db.cursor.fetchall())
+
+			if query_results is None:
+				query_results = list(self.db.cursor.fetchall())
 
 			if aggregated:
 				results = np.zeros((len(id_vec),))
-				for s_id,orig_fp,val in self.db.cursor.fetchall():
+				for s_id,orig_fp,val in query_results:
 					results[index_reverse[orig_fp]] += val
 				results = results/nb_sim # normalization outside of loop (not +=val/nb_sim) to avoid accumulation of rounding errors
 			else:
 				# as sparse; having to shift sim_id by nb_sim*(orig_fp) to stack simulations by orig_fp
-				results_data = [(reverse_sim_index[s_id]-nb_sim*index_reverse[orig_fp],index_reverse[orig_fp],val) for s_id,orig_fp,val in self.db.cursor.fetchall()]
+				results_data = [(reverse_sim_index[s_id]-nb_sim*index_reverse[orig_fp],index_reverse[orig_fp],val) for s_id,orig_fp,val in query_results]
 				results_v = np.asarray([r[2] for r in results_data])
 				results_i = np.asarray([r[0] for r in results_data])
 				results_j = np.asarray([r[1] for r in results_data])
@@ -480,7 +540,10 @@ class ExperimentManager(object):
 			values.append(v)
 			dates.append(d)
 
+
 		plt.plot(dates,values,label=project_name)
+		plt.gcf().autofmt_xdate()
+		# ax.fmt_xdata = mdates.DateFormatter('%Y-%m-%d')
 		plt.title(measure)
 
 		if show:
@@ -492,7 +555,7 @@ class ExperimentManager(object):
 		Computes proba distributions for all projects, for a given snapshot or iterating through all snapshots and source failing_project
 		'''
 		if snapshot_id is None:
-			logger.info('Computing proba_distrib {} for all snapshots'.format(measure))
+			logger.info('Computing proba_distrib for all snapshots')
 			self.db.cursor.execute('SELECT id FROM snapshots;')
 			snapshot_id_list = [ r[0] for r in self.db.cursor.fetchall()]
 			for snapid in snapshot_id_list:
@@ -510,4 +573,4 @@ class ExperimentManager(object):
 					value_vec = sim.compute_exact(implementation=proba_implementation)
 					self.db.fill_exact_comp(snapshot_id=snapshot_id,source_id=p_id,value_vec=value_vec,projid_vec=projid_vec,commit=False,proba_implementation=proba_implementation,**sim_cfg)
 			else:
-				logger.info('Proba distrib for snapshot {} already computed'.format(measure,snapshot_id))
+				logger.info('Proba distrib for snapshot {} already computed'.format(snapshot_id))

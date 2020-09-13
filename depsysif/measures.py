@@ -90,3 +90,16 @@ def complete_cfg_mean_cascade_length(nb_sim,**measure_cfg):
 	return cfg
 ###################
 ###################
+
+###################
+#FAILURE_PROBA function of source_id
+###################
+###################
+#CAUSING_FAILURE_PROBA function of target_id
+###################
+###################
+#COMPUTED_CAUSING_FAILURE_PROBA function of target_id
+###################
+###################
+#COMPUTED_FAILURE_PROBA function of source_id
+###################

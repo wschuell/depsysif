@@ -85,3 +85,13 @@ xp_man.compute_exact_proba(implementation='network') # or implementation='matrix
 #Plot proba distribution
 <measure to be implemented>
 ```
+
+# Other notes
+
+```
+# Moving a SQLite DB fully to the RAM:
+db.move_to_ram()
+... do insert-heavy stuff like simulations
+db.get_back_from_ram() # needed if you want your DB content to be saved on disk
+```
+

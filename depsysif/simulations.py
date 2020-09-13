@@ -24,6 +24,7 @@ class Simulation(object):
 	'''
 	default_propag_proba = 0.9
 	default_norm_exponent=0.
+	# default_implementation = 'classic'
 	default_implementation = 'matrix'
 
 	def __init__(self,failing_project,network=None,propag_proba=default_propag_proba,norm_exponent=default_norm_exponent,implementation=default_implementation,random_seed=None,verbose=False,snapshot_id=None,set_network=True,bootstrap_sim=None):
@@ -89,14 +90,15 @@ class Simulation(object):
 
 		elif network is not None:
 			self.network = network
-			self.sparse_mat = nx.to_scipy_sparse_matrix(network).astype(np.bool)
 			self.index_nodes = np.sort(self.network.nodes())
 			self.index_reverse = {n:i for i,n in enumerate(sorted(self.network.nodes()))} # sorted ensures that the process is deterministic (given the random seed)
 
-			with np.errstate(divide='ignore',invalid='ignore'):
-				norm_propag = 1./np.power(self.sparse_mat.sum(axis=0),self.norm_exponent)
+			if len(network.nodes())>0:
+				self.sparse_mat = nx.to_scipy_sparse_matrix(network).astype(np.bool)
+				with np.errstate(divide='ignore',invalid='ignore'):
+					norm_propag = 1./np.power(self.sparse_mat.sum(axis=0),self.norm_exponent)
 			# self.propag_mat = nx.to_scipy_sparse_matrix(network).multiply(self.propag_proba/norm_propag).tocsr()
-			self.propag_mat = self.sparse_mat.multiply(self.propag_proba/norm_propag).tocsr()
+				self.propag_mat = self.sparse_mat.multiply(self.propag_proba/norm_propag).tocsr()
 			# self.propag_mat = nx.to_scipy_sparse_matrix(network).transpose().multiply(self.propag_proba/norm_propag).tocsr()
 			# self.propag_mat = nx.to_scipy_sparse_matrix(network).multiply(self.propag_proba/norm_propag).tocsr() # CHECK MULTIPLICATIONS ARE ALONG RIGHT DIMENSIONS
 			# self.network_diameter = nx.diameter(self.network.to_undirected())
@@ -133,8 +135,17 @@ class Simulation(object):
 			if self.verbose:
 				logger.info('Simulation already ran, skipping')
 		else:
-			self.reset_random_generator()
-			if self.implementation=='classic':
+			if project_id is None:
+				project_id = self.failing_project
+			if all(False for _ in self.network.predecessors(project_id)): # checking if element is dependency of no other package (checking if at least one element in iterator)
+
+				total_nodes = len(self.network.nodes())
+				failed_nodes = np.zeros((total_nodes,),dtype=np.bool)
+				project_nb = self.index_reverse[project_id]
+				failed_nodes[project_nb] = 1
+
+			elif self.implementation=='classic':
+				self.reset_random_generator()
 				total_nodes = len(self.network.nodes())
 				# index_nodes = np.sort(self.network.nodes()) # building indexes to match order in the vector and id in network
 				# index_nodes = {i:n for i,n in enumerate(sorted(self.network.nodes()))} # building indexes to match order in the vector and id in network
@@ -142,8 +153,6 @@ class Simulation(object):
 
 				# failed nodes and new_failed are vectors with ones (instead of sets or dicts)
 				# initial state: a one only for the source project
-				if project_id is None:
-					project_id = self.failing_project
 				project_nb = self.index_reverse[project_id]
 
 				failed_nodes = np.zeros((total_nodes,),dtype=np.bool)
@@ -155,7 +164,8 @@ class Simulation(object):
 
 				iteration = 0
 
-				while new_failed.sum()>0:
+				# while new_failed.sum()>0:
+				while new_failed.any()>0:
 					iteration += 1
 					source_nb_list = np.where(new_failed>0)[0]
 					new_failed = np.zeros((total_nodes,),dtype=np.bool)
@@ -170,9 +180,8 @@ class Simulation(object):
 						logger.info('Iteration {}, new failing {}, total failing {}, total nodes {}'.format(iteration,new_failed.sum(),failed_nodes.sum(),total_nodes))
 
 			elif self.implementation == 'matrix':
+				self.reset_random_generator()
 				total_nodes = len(self.network.nodes())
-				if project_id is None:
-					project_id = self.failing_project
 				project_nb = self.index_reverse[project_id]
 
 				failed_nodes = np.zeros((total_nodes,),dtype=np.bool)
@@ -181,19 +190,26 @@ class Simulation(object):
 				new_failed = np.zeros((total_nodes,),dtype=np.bool)
 				new_failed[project_nb] = 1
 
-				mat = copy.deepcopy(self.propag_mat)
+				# mat = copy.deepcopy(self.propag_mat)
+				mat = self.propag_mat
 
 
 
 				iteration = 0
 
-				while new_failed.sum()>0:
+				# while new_failed.sum()>0:
+				while new_failed.any():
 					iteration += 1
 					# random_mat = copy.deepcopy(mat)
 					# random_mat.data = self.random_generator.random(mat.data.shape)
 					# intermediary_vec = (mat-random_mat).dot(new_failed)
-					intermediary_vec = mat.dot(new_failed)
-					new_failed = (intermediary_vec>self.random_generator.random(new_failed.shape))
+					intermediary_vec = scipy.sparse.csr_matrix(mat.dot(new_failed))
+					# intermediary_vec = mat.dot(scipy.sparse.csr_matrix(new_failed).transpose())
+					# intermediary_vec = mat.dot(new_failed)
+					intermediary_vec.data = intermediary_vec.data>self.random_generator.random(intermediary_vec.data.shape)
+					# new_failed = (intermediary_vec>self.random_generator.random(new_failed.shape))
+
+					new_failed = intermediary_vec.toarray().reshape((total_nodes,))
 					# print('mat',mat.shape,mat.sum())
 					# print(new_failed.shape,new_failed.sum())
 					new_failed = np.logical_and(new_failed,np.logical_not(failed_nodes))
