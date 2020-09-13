@@ -1117,7 +1117,7 @@ class Database(object):
 		else:
 			if self.db_type == 'postgres':
 				if sim_id is None:
-					self.cursor.execute('''SELECT id FROM simulations
+					self.cursor.execute('''SELECT id,executed FROM simulations
 								WHERE snapshot_id=%s
 								AND sim_cfg=%s
 								AND random_seed=%s
@@ -1129,10 +1129,10 @@ class Database(object):
 						self.register_simulation(simulation=simulation,snapshot_id=snapshot_id)
 						return
 					else:
-						sim_id,executed = sim_id_list[0]
-					if executed:
-						logger.info('Simulation results already filled in')
-						return
+						sim_id,executed = sim_id_list
+						if executed:
+							logger.info('Simulation results already filled in')
+							return
 				extras.execute_batch(self.cursor,'''
 						INSERT INTO simulation_results(simulation_id,failing)
 						VALUES(%s,%s)
@@ -1140,7 +1140,7 @@ class Database(object):
 				self.cursor.execute('''UPDATE simulations SET executed=TRUE WHERE id=%s;''',(sim_id,))
 			else:
 				if sim_id is None:
-					self.cursor.execute('''SELECT id FROM simulations
+					self.cursor.execute('''SELECT id,executed FROM simulations
 								WHERE snapshot_id=?
 								AND sim_cfg=?
 								AND random_seed=?
@@ -1150,8 +1150,12 @@ class Database(object):
 					sim_id_list = self.cursor.fetchone()
 					if sim_id_list is None:
 						self.register_simulation(simulation=simulation,snapshot_id=snapshot_id,commit=False)
+						return
 					else:
-						sim_id = sim_id_list[0]
+						sim_id,executed = sim_id_list
+						if executed:
+							logger.info('Simulation results already filled in')
+							return
 				self.cursor.executemany('''
 						INSERT INTO simulation_results(simulation_id,failing)
 						VALUES(?,?)
