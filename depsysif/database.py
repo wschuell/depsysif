@@ -729,8 +729,9 @@ class Database(object):
 
 				def new_reader():
 					for r in reader:
-						for d in r[3].split(','):
-							yield (r[0],r[1],d)
+						if r[3] != '':
+							for d in r[3].split(','):
+								yield (r[0],r[1],d)
 
 				if self.db_type == 'postgres':
 					extras.execute_batch(self.cursor,'''INSERT INTO dependencies(version_id,project_id)
