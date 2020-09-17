@@ -9,6 +9,9 @@ import csv
 import copy
 import json
 
+import sys
+csv.field_size_limit(sys.maxsize)
+
 logger = logging.getLogger(__name__)
 ch = logging.StreamHandler()
 ch.setLevel(logging.DEBUG)
@@ -658,6 +661,89 @@ class Database(object):
 					extras.execute_batch(self.cursor,'INSERT INTO dependencies(version_id,project_id) VALUES(%s,%s) ON CONFLICT DO NOTHING;',reader)
 				else:
 					self.cursor.executemany('INSERT OR IGNORE INTO dependencies(version_id,project_id) VALUES(?,?);',reader)
+
+				self.connection.commit()
+			logger.info('Filled dependencies')
+
+
+
+		if delete_autodeps:
+			self.delete_auto_dependencies()
+
+	def fill_from_singlecsv(self,folder='.',filename='raw_dependencies.csv',headers_present=True,delimiter=',',delete_autodeps=True):
+		'''
+		Fill from a single csv files, as provided for pypi network
+
+		expected syntax:
+		name,version,date,deps,raw_dependencies
+		'''
+
+		# PROJECTS
+		if not self.is_empty(table='projects'):
+			logger.info('Table projects already filled')
+		else:
+			logger.info('Filling projects from file {}'.format(filename))
+			with open(os.path.join(folder,filename),'r') as f:
+				reader = csv.reader(f,delimiter=delimiter)
+				if headers_present:
+					next(reader)
+
+				if self.db_type == 'postgres':
+					extras.execute_batch(self.cursor,'INSERT INTO projects(name,created_at) VALUES(%s,%s) ON CONFLICT DO NOTHING;',((r[0],r[2]) for r in reader))
+				else:
+					self.cursor.executemany('INSERT OR IGNORE INTO projects(name,created_at) VALUES(?,?);',((r[0],r[2]) for r in reader))
+				self.connection.commit()
+			logger.info('Filled projects')
+
+
+		# VERSIONS
+		if not self.is_empty(table='versions'):
+			logger.info('Table versions already filled')
+		else:
+			logger.info('Filling versions from file {}'.format(filename))
+			with open(os.path.join(folder,filename),'r') as f:
+				reader = csv.reader(f,delimiter=delimiter)
+				if headers_present:
+					next(reader)
+
+				if self.db_type == 'postgres':
+					extras.execute_batch(self.cursor,'INSERT INTO versions(name,project_id,created_at) VALUES(%s,(SELECT id FROM projects WHERE name=%s),%s) ON CONFLICT DO NOTHING;',((r[1],r[0],r[2]) for r in reader))
+				else:
+					self.cursor.executemany('INSERT OR IGNORE INTO versions(name,project_id,created_at) VALUES(?,(SELECT id FROM projects WHERE name=?),?);',((r[1],r[0],r[2]) for r in reader))
+
+				self.connection.commit()
+			logger.info('Filled versions')
+
+		# DEPENDENCIES
+		if not self.is_empty(table='dependencies'):
+			logger.info('Table dependencies already filled')
+		else:
+			logger.info('Filling dependencies from file {}'.format(filename))
+
+
+
+			with open(os.path.join(folder,filename),'r') as f:
+				reader = csv.reader(f,delimiter=delimiter)
+				if headers_present:
+					next(reader)
+
+				def new_reader():
+					for r in reader:
+						for d in r[3].split(','):
+							yield (r[0],r[1],d)
+
+				if self.db_type == 'postgres':
+					extras.execute_batch(self.cursor,'''INSERT INTO dependencies(version_id,project_id)
+									 VALUES((SELECT v.id FROM versions v
+									 			INNER JOIN projects p
+									 			ON p.name=%s AND v.name=%s AND v.project_id=p.id),
+					 						(SELECT id FROM projects WHERE name=%s)) ON CONFLICT DO NOTHING;''',new_reader())
+				else:
+					self.cursor.executemany('''INSERT OR IGNORE INTO dependencies(version_id,project_id)
+									 VALUES((SELECT v.id FROM versions v
+									 			INNER JOIN projects p
+									 			ON p.name=? AND v.name=? AND v.project_id=p.id),
+					 						(SELECT id FROM projects WHERE name=?));''',new_reader())
 
 				self.connection.commit()
 			logger.info('Filled dependencies')
