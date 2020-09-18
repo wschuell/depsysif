@@ -7,7 +7,7 @@ Studying systemic risk in dependency hierarchies of open-source software develop
 
 Master is stable, develop is the latest common version.
 
-To install, clone the repo, checkout to the wanted branch, and run:
+To install, clone the repo, checkout to the wanted branch (or simply stay in master), and run:
 `python3 setup.py develop`
 
 You can then import the module elsewhere with `import depsysif`.
@@ -36,7 +36,7 @@ Could be included in Database as a super-class, but in this way the two interfac
 # Importing data
 
 ```
-db = Database(db_type='sqlite',db_name='depsysif',db_folder='./')
+db = depsysif.database.Database(db_type='sqlite',db_name='depsysif',db_folder='./')
 
 # Filling alternatives, just run one of them:
 # From a DB created from crates.io data. You may need to change args for postgres: username, port, host, db_name
@@ -47,10 +47,12 @@ db.fill_from_crates(optional=True,dependency_types=['0'])
 db.fill_from_libio()
 db.fill_from_libio(platform='Cargo')
 db.fill_from_libio(dependency_types=['runtime','normal'])
+# From a set of 3 CSV files: projects.csv,versions.csv,dependencies.csv
+db.fill_from_csv(folder='test_csvs') 
 
 # Trimming cycles (deleted_dependencies table in the DB keeps track of them)
 db.delete_autorefs() # cycles of length 1
-db.delete_from_list(dep_list=) # deleting specific
+db.delete_from_list(dep_list=) # deleting specific list
 db.delete_from_list(filename=depsysif_path+'/depsysif/deps_to_delete.txt') # This example file contains known cycle-inducing dependencies for cargo projects, you can provide any other file with a list of lines with this syntax :<source id or name>,<target id or name>
 
 ```
@@ -63,7 +65,7 @@ db.build_snapshot(snapshot_time='2018-12-10')
 db.build_snapshot(snapshot_time='2019-09-02')
 
 # Getting the experiment manager
-xp_man = ExperimentManager(db=db)
+xp_man = depsysif.experiment_manager.ExperimentManager(db=db)
 
 # Running simulations, nb_sim iterations for each configuration (ie for all snapshots, for all source project IDs):
 xp_man.run_simulations(nb_sim=10) # You can provide other arguments here as well, like norm_exponent (default 0), implementation ('classic' or 'matrix') and propag_proba (default 0.9)
