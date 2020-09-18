@@ -595,6 +595,51 @@ class Database(object):
 		if delete_autodeps:
 			self.delete_auto_dependencies()
 
+	def output_struct_as_csvs(self,folder='.',projects_file='projects.csv',versions_file='versions.csv',dependencies_file='dependencies.csv',headers_present=False,delimiter=',',overwrite=False):
+		'''
+		Extracts the infos of the DB as CSVs, to be reused elsewhere using the method fill_from_csv
+		'''
+		p_file = os.path.join(folder,projects_file)
+		v_file = os.path.join(folder,versions_file)
+		d_file = os.path.join(folder,dependencies_file)
+		if not overwrite and os.path.exists(p_file):
+			logger.info('Projects file {} already exists, skipping'.format(p_file))
+		else:
+			self.cursor.execute('''
+				SELECT id,name,created_at FROM projects ORDER BY id
+				;''')
+			with open(p_file,'w') as f:
+		 		if headers_present:
+		 			f.write('id, name, created_at\n')
+				for r in self.cursor.fetchall():
+					f.write('{},"{}","{}"\n'.format(*r))
+			logger.info('Extracted projects in {}'.format(p_file))
+
+		if not overwrite and os.path.exists(v_file):
+			logger.info('Versions file {} already exists, skipping'.format(v_file))
+		else:
+			self.cursor.execute('''
+				SELECT id,name,project_id,created_at FROM versions ORDER BY id
+				;''')
+			with open(v_file,'w') as f:
+		 		if headers_present:
+		 			f.write('id, number, project_id, created_at\n')
+				for r in self.cursor.fetchall():
+					f.write('{},"{}",{},"{}"\n'.format(*r))
+			logger.info('Extracted versions in {}'.format(v_file))
+
+		if not overwrite and os.path.exists(d_file):
+			logger.info('Dependencies file {} already exists, skipping'.format(d_file))
+		else:
+			self.cursor.execute('''
+				SELECT version_id,project_id FROM dependencies
+				;''')
+			with open(d_file,'w') as f:
+		 		if headers_present:
+		 			f.write('version_id,project_id\n')
+				for r in self.cursor.fetchall():
+					f.write('{},{}\n'.format(*r))
+			logger.info('Extracted dependencies in {}'.format(d_file))
 
 	def fill_from_csv(self,folder='.',projects_file='projects.csv',versions_file='versions.csv',dependencies_file='dependencies.csv',headers_present=False,delimiter=',',delete_autodeps=True):
 		'''
