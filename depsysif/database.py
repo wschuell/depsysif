@@ -602,6 +602,10 @@ class Database(object):
 		p_file = os.path.join(folder,projects_file)
 		v_file = os.path.join(folder,versions_file)
 		d_file = os.path.join(folder,dependencies_file)
+
+		if not os.path.exists(folder):
+			os.makedirs(folder)
+
 		if not overwrite and os.path.exists(p_file):
 			logger.info('Projects file {} already exists, skipping'.format(p_file))
 		else:
@@ -609,8 +613,8 @@ class Database(object):
 				SELECT id,name,created_at FROM projects ORDER BY id
 				;''')
 			with open(p_file,'w') as f:
-		 		if headers_present:
-		 			f.write('id, name, created_at\n')
+				if headers_present:
+					f.write('id, name, created_at\n')
 				for r in self.cursor.fetchall():
 					f.write('{},"{}","{}"\n'.format(*r))
 			logger.info('Extracted projects in {}'.format(p_file))
@@ -622,8 +626,8 @@ class Database(object):
 				SELECT id,name,project_id,created_at FROM versions ORDER BY id
 				;''')
 			with open(v_file,'w') as f:
-		 		if headers_present:
-		 			f.write('id, number, project_id, created_at\n')
+				if headers_present:
+					f.write('id, number, project_id, created_at\n')
 				for r in self.cursor.fetchall():
 					f.write('{},"{}",{},"{}"\n'.format(*r))
 			logger.info('Extracted versions in {}'.format(v_file))
@@ -635,8 +639,8 @@ class Database(object):
 				SELECT version_id,project_id FROM dependencies
 				;''')
 			with open(d_file,'w') as f:
-		 		if headers_present:
-		 			f.write('version_id,project_id\n')
+				if headers_present:
+					f.write('version_id,project_id\n')
 				for r in self.cursor.fetchall():
 					f.write('{},{}\n'.format(*r))
 			logger.info('Extracted dependencies in {}'.format(d_file))
