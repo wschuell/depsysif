@@ -4,7 +4,7 @@ services:
 python:
   - "3.7"
 before_install:
- - sudo apt-get update -qq
+  - sudo apt-get update -qq
   - python -c 'import os, virtualenv; virtualenv.install_distutils(os.environ["VIRTUAL_ENV"])'
 before_script:
   - psql -c 'create database travis_ci_test_depsysif;' -U postgres
