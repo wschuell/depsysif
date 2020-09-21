@@ -1,6 +1,4 @@
 networkx
 matplotlib
 numpy>=1.17
-pandas
-psycopg2
 scipy

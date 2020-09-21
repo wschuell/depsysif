@@ -2,8 +2,7 @@ import os
 import datetime
 import logging
 import sqlite3
-import psycopg2
-from psycopg2 import extras
+
 import networkx as nx
 import csv
 import copy
@@ -20,6 +19,11 @@ ch.setFormatter(formatter)
 logger.addHandler(ch)
 logger.setLevel(logging.INFO)
 
+try:
+	import psycopg2
+	from psycopg2 import extras
+except ImportError:
+	logger.warning('Package psycopg2 could not be imported, please pip install psycopg2 or psycopg2-binary it if you want to use/import from PostgreSQL databases')
 
 from . import utils
 
