@@ -58,7 +58,17 @@ class Database(object):
 		elif db_type == 'postgres':
 			if password is not None:
 				logger.warning('You are providing your password directly, this could be a security concern, consider using solutions like .pgpass file.')
-			self.connection = psycopg2.connect(user=db_user,port=port,host=host,database=db_name,password=password)
+			try:
+				self.connection = psycopg2.connect(user=db_user,port=port,host=host,database=db_name,password=password)
+			except psycopg2.OperationalError:
+				pgpass_env = 'PGPASSFILE'
+				default_pgpass = os.path.join(os.environ['HOME'],'.pgpass')
+				if pgpass_env not in os.environ.keys():
+					os.environ[pgpass_env] = default_pgpass
+					self.logger.info('Password authentication failed,trying to set .pgpass env variable')
+					self.connection = psycopg2.connect(user=db_user,port=port,host=host,database=db_name,password=password)
+				else:
+					raise
 			self.cursor = self.connection.cursor()
 		else:
 			raise ValueError('Unknown DB type: {}'.format(db_type))
